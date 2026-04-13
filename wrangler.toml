@@ -1,0 +1,20 @@
+name = "parley-protocol-spec"
+main = "src/index.ts"
+compatibility_date = "2026-04-14"
+workers_dev = false
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "404-page"
+
+# Deploy steps:
+#   1. brew install pandoc                 (one-time, only for HTML build)
+#   2. ./build.sh                          (renders dist/)
+#   3. bun install                         (for wrangler)
+#   4. wrangler deploy                     (deploys the Worker + static assets)
+#   5. Add custom domain spec.parleywallet.app via Cloudflare dashboard
+#      or `wrangler secret` / routes config once zone is bound.
+
+[observability]
+enabled = true
