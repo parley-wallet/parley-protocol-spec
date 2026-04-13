@@ -6,9 +6,13 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // Redirect bare root to the canonical v1 location.
+    // Redirect bare root and legacy .html path to the canonical v1 location.
+    // Cloudflare static assets auto-strip .html, so canonical is `/v1/protocol`.
     if (url.pathname === "/" || url.pathname === "") {
-      return Response.redirect(`${url.origin}/v1/protocol.html`, 301);
+      return Response.redirect(`${url.origin}/v1/protocol`, 301);
+    }
+    if (url.pathname === "/v1/protocol.html") {
+      return Response.redirect(`${url.origin}/v1/protocol`, 301);
     }
 
     const response = await env.ASSETS.fetch(request);
