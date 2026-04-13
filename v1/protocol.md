@@ -530,7 +530,7 @@ The active DSTs in Section 5.1 are byte distinct and no two share a prefix. Impl
 | `SESSION_TIMEOUT_SECONDS` | 120 | seconds | Issuance session timeout (2 minutes) |
 | `ATTESTATION_MAX_AGE_SECONDS` | 3600 | seconds | Ed25519 attestation freshness window (1 hour) |
 | `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS` | 60 | seconds | Maximum permitted clock skew when an attestation timestamp is ahead of local time |
-| `MAX_VALIDITY_SECONDS` | 31 536 000 | seconds | Hard ceiling on credential lifetime (`exp - iat`); 365 days. Recommended default is 90 days (7 776 000). |
+| `MAX_VALIDITY_SECONDS` | 3 155 760 000 | seconds | Hard ceiling on credential lifetime (`exp - iat`); 36 500 days (approximately 100 years). Operator policy SHOULD be tighter; 90 days (7 776 000) is a conservative default for general deployments. |
 
 The `SESSION_TIMEOUT_SECONDS` value is given here in seconds. The reference implementation declares the equivalent constant as `SESSION_TIMEOUT_MS = 120_000` (milliseconds). Implementations MUST treat the canonical value as 120 seconds and convert to other units as needed for their environment.
 
@@ -1090,8 +1090,8 @@ Step 7.  The Issuance Server constructs CredMsgV2:
          The Issuance Server MUST set `iat` within
          `CLOCK_SKEW_TOLERANCE_SECONDS` of its wall-clock current
          time. The Issuance Server MUST set `exp > iat` and
-         `exp - iat <= MAX_VALIDITY_SECONDS` (31 536 000; 365 days).
-         90 days is the recommended default; longer validity
+         `exp - iat <= MAX_VALIDITY_SECONDS` (3 155 760 000; 36 500 days, ~100 years).
+         90 days is the recommended default for general deployments; longer validity
          periods SHOULD NOT be issued without a documented
          deployment reason.
 
