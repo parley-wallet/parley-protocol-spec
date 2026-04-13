@@ -1,7 +1,11 @@
 name = "parley-protocol-spec"
 main = "src/index.ts"
-compatibility_date = "2026-04-14"
+compatibility_date = "2026-04-01"
 workers_dev = false
+
+routes = [
+  { pattern = "spec.parleywallet.app", custom_domain = true }
+]
 
 [assets]
 directory = "./dist"

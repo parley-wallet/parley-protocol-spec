@@ -19,20 +19,8 @@ pandoc "${ROOT}/v1/protocol.md" \
   --css /style.css \
   --output "${DIST}/v1/protocol.html"
 
-# Copy index that redirects to v1.
-cat > "${DIST}/index.html" <<'EOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=/v1/protocol.html">
-<title>Parley Protocol Specification</title>
-</head>
-<body>
-<p>Redirecting to <a href="/v1/protocol.html">v1.0.0</a>.</p>
-</body>
-</html>
-EOF
+# Root redirect is handled by the Worker in src/index.ts; no index.html needed.
+rm -f "${DIST}/index.html"
 
 # Minimal stylesheet.
 cat > "${DIST}/style.css" <<'EOF'
