@@ -16,7 +16,13 @@
 
 ## Abstract
 
-Parley is a zero knowledge age verification protocol. A wallet holding a date of birth credential, signed by an authorised issuer, proves to a verifier that the holder satisfies an age threshold (for example "at least 18 years old") without revealing the date of birth, the credential signature, or any other identifying information. The protocol uses Groth16 over BLS12-381 with a Jubjub-embedded credential signature based on RedJubjub, Pedersen commitments for the date of birth, Ed25519 attestations from identity providers, Blake2s-256 and SHA-256 for hashing, and PKCE for session binding. Cross-verifier unlinkability of nullifiers is operational, not cryptographic; two Verifiers who collude by exchanging nullifier logs can determine that the same credential was used at both (Section 18.4). This document specifies the normative cryptographic constructions, wire formats, and protocol flows. An implementation conforming to this specification is interoperable with other conforming implementations across the issuance, proof, and verification roles.
+Parley is a zero knowledge protocol for age-threshold verification. A holder with a date of birth credential, issued once by an authorised identity provider, proves to a Verifier that the committed date of birth satisfies an age threshold: either a minimum (for example "at least 18 years old") or a maximum (for example "under 13 years old"). The Verifier returns a binary pass/fail result to the Relying Party that initiated the verification; the Relying Party receives only this result and never sees the proof or its public inputs (which include the nullifier). The Verifier sees the proof and its public inputs but does not learn the date of birth, the credential signature, the holder's identity, or any other attribute bound into the credential. The Issuer is not contacted at verification time.
+
+A single arithmetic circuit evaluates both directions via a public selector bit that conditions operand ordering, so one proving key and one verifying key cover both predicates per circuit version. Proofs are 192 bytes. The protocol uses Groth16 over BLS12-381 with a Jubjub-embedded credential signature based on RedJubjub, Pedersen commitments for the date of birth, Ed25519 attestations from identity providers, Blake2s-256 and SHA-256 for hashing, and PKCE session binding. Groth16 requires a per-circuit trusted setup (Section 17.3). None of the cryptographic primitives used here is post-quantum secure; this specification assumes a pre-quantum threat model.
+
+Nullifiers are deterministic per credential and are visible to the Verifier only; they enable the Verifier to block abusive or compromised credentials from future verifications. Two Verifiers who compare nullifier logs can determine that the same credential was used at both; unlinkability across Verifiers is a deployment property, not a protocol guarantee (Section 18.4).
+
+This document specifies the normative cryptographic constructions, wire formats, protocol flows, and conformance requirements. Interoperability across implementations is demonstrated via the normative test vectors in Appendix A.
 
 ---
 
@@ -101,7 +107,7 @@ Parley is built on three cryptographic ideas, each well established. First, a Pe
 
 A separate Ed25519 signature, produced by the identity provider, attests to the date of birth at issuance time. The wallet relays this attestation to the issuance server, which verifies it before computing the Pedersen commitment server side. The wallet supplies the randomness; the server supplies the attested date of birth. Neither party can produce a credential committing to a date of birth different from the one the identity provider attested to.
 
-The protocol operates entirely without persistent user accounts at the verifier. Each verification request begins with a fresh challenge containing a 32 byte nonce, an origin string, an age threshold, and a PKCE code challenge. The wallet returns a proof bound to that challenge. Replay is prevented by short challenge expiry, single use challenge consumption, a 32 byte submit secret returned only to the relying party, and a deterministic per credential nullifier.
+The protocol operates entirely without persistent user accounts at the verifier. Each verification request begins with a fresh challenge containing a 32 byte nonce, an origin string, an age threshold, and a PKCE code challenge. The wallet returns a proof bound to that challenge. Replay is prevented by short challenge expiry, single use challenge consumption, and a 32 byte submit secret returned only to the relying party. A deterministic per credential nullifier is also emitted as a public input; this is used by the Verifier for credential ban enforcement, not for replay prevention.
 
 ### 1.3 Three Party Model
 
@@ -364,7 +370,7 @@ Step 8.  The Wallet submits to the Verifier: challenge_id, submit_secret,
          issuer_vk, nullifier.
 Step 9.  The Verifier loads the challenge record, validates submit_secret
          in constant time, recomputes rp_hash, checks the nullifier
-         against its replay store, looks up the issuer in its allowlist,
+         against its ban store, looks up the issuer in its allowlist,
          and verifies the Groth16 proof.
 Step 10. The Verifier records the result and marks the challenge as
          consumed.
@@ -383,7 +389,7 @@ Each party trusts a small, named set of other parties for specific things.
 
 The Wallet trusts the Issuer's RedJubjub credential signing key to attest only to dates of birth that the Issuer in fact verified. The Wallet trusts the platform CSPRNG to produce 128 bits of unbiased randomness. The Wallet trusts the platform secure storage to protect the credential.
 
-The Verifier trusts the Issuer's RedJubjub verifying key, as registered in the Verifier's allowlist, to identify legitimate credentials. The Verifier trusts the integrity of the Groth16 trusted setup that produced the proving and verifying keys for the age circuit. The Verifier trusts its own session storage for replay state.
+The Verifier trusts the Issuer's RedJubjub verifying key, as registered in the Verifier's allowlist, to identify legitimate credentials. The Verifier trusts the integrity of the Groth16 trusted setup that produced the proving and verifying keys for the age circuit. The Verifier trusts its own session storage for challenge state and nullifier ban state.
 
 The Relying Party trusts the Verifier to enforce protocol invariants: challenge expiry, nullifier deduplication, in circuit proof verification, off circuit credential expiry rejection, PKCE single use, and constant time checks on secret comparisons.
 
@@ -526,7 +532,7 @@ The active DSTs in Section 5.1 are byte distinct and no two share a prefix. Impl
 |---|---|---|---|
 | `CHALLENGE_EXPIRY_SECONDS` | 300 | seconds | Challenge validity window (5 minutes) |
 | `CLOCK_SKEW_TOLERANCE_SECONDS` | 30 | seconds | Generic clock drift allowance |
-| `REPLAY_WINDOW_SECONDS` | 600 | seconds | Duration a nullifier remains tracked in the replay store, measured from challenge creation time (not from challenge expiry). |
+| `NULLIFIER_BAN_TTL_SECONDS` | 600 | seconds | Duration a nullifier remains in the Verifier's ban store after a verification, measured from challenge creation time. Used for credential ban enforcement; not a replay-protection mechanism. |
 | `SESSION_TIMEOUT_SECONDS` | 120 | seconds | Issuance session timeout (2 minutes) |
 | `ATTESTATION_MAX_AGE_SECONDS` | 3600 | seconds | Ed25519 attestation freshness window (1 hour) |
 | `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS` | 60 | seconds | Maximum permitted clock skew when an attestation timestamp is ahead of local time |
@@ -538,7 +544,7 @@ The `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS = 60` value differs from the gener
 
 **Invariants.** Implementations MUST satisfy:
 - `CHALLENGE_EXPIRY_SECONDS > CLOCK_SKEW_TOLERANCE_SECONDS`
-- `REPLAY_WINDOW_SECONDS >= CHALLENGE_EXPIRY_SECONDS + CLOCK_SKEW_TOLERANCE_SECONDS` (600 ≥ 330 satisfies this by design)
+- `NULLIFIER_BAN_TTL_SECONDS >= CHALLENGE_EXPIRY_SECONDS + CLOCK_SKEW_TOLERANCE_SECONDS` (600 ≥ 330 satisfies this by design)
 - `ATTESTATION_MAX_AGE_SECONDS > ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS`
 
 These values are normative for v1.0 and changing any of them produces a different protocol version.
@@ -900,7 +906,7 @@ PedersenNullifier(c_bytes):
     return compress(point)                    // 32 bytes
 ```
 
-**Determinism.** For a given commitment, the nullifier is deterministic. Two proofs generated from the same credential present the same nullifier. Verifiers MAY use this property for replay detection within their own deployment.
+**Determinism.** For a given commitment, the nullifier is deterministic. Two proofs generated from the same credential present the same nullifier. Verifiers use this property to maintain a ban store of nullifiers belonging to abusive or compromised credentials; any proof whose nullifier is in the ban store is rejected. Replay protection is handled separately by single-use challenge consumption, the `submit_secret`, and PKCE.
 
 **Cross verifier linkability.** The nullifier is deterministic per credential, meaning if two Verifiers were to compare nullifier logs they could determine that the same credential had been used at both. In practice Verifiers operate independently and do not share nullifier databases. This privacy limitation is documented in Section 18.4.
 
@@ -1838,11 +1844,11 @@ Step 9.  The Verifier processes the submission:
    9d. Compute rp_hash = H_b2s(rp_challenge). This is the value
        the proof's public inputs should encode at indices 2-3.
 
-   9e. Check the nullifier against the replay store:
-           if nullifier in replay_store with timestamp >= now - REPLAY_WINDOW_SECONDS:
-               return Error::NullifierReplay
+   9e. Check the nullifier against the ban store:
+           if nullifier in nullifier_ban_store with timestamp >= now - NULLIFIER_BAN_TTL_SECONDS:
+               return Error::CredentialBanned
            else:
-               replay_store.insert(nullifier, now)
+               nullifier_ban_store.insert(nullifier, now)
 
    9f. Look up the issuer in the issuer registry by issuer_vk_bytes.
        If not present or status != Active, return Error::UnknownIssuer.
@@ -1915,28 +1921,32 @@ where `date_n_years_ago(now, n)` is the calendar date `n` years before `now`, ac
 
 An alternative computation is `cutoff_days = floor(now_days - n * 365.25)`. This is approximate (may disagree by one day at year boundaries) but cheaper. Implementations MAY use either; the choice does not affect interoperability since `cutoff_days` is a public input transmitted alongside the proof.
 
-### 14.9 Replay Protection Layers
+### 14.9 Replay Protection and Ban Enforcement
 
-Replay is prevented through two categories of mechanisms: **defence layers** that a replaying attacker MUST defeat to succeed, and **supporting properties** that bound the window or harden the defences. A defender requires only that any one defence layer hold; an attacker must defeat every defence layer simultaneously to replay a proof.
+Two independent concerns:
 
-Defence layers. Each row below is an independently-sufficient block on a replayed submission.
+**Replay protection.** Prevents a captured proof from being submitted a second time. Achieved by four independently-sufficient defence layers; a defender requires only that any one layer hold, and an attacker must defeat every layer simultaneously to replay a proof.
 
-| Defence layer | Mechanism |
+| Replay defence layer | Mechanism |
 |---|---|
 | Single-use challenge | Challenge state moves Pending → Consumed on first valid submission. Subsequent submissions against the same `challenge_id` MUST be rejected. |
-| Nullifier deduplication | The Pedersen nullifier is a public input; duplicates within the replay window are rejected. |
 | Submit secret | The 32 byte `submit_secret` is shared only RP→Wallet; third parties observing the public challenge cannot reconstruct it and cannot submit. |
 | RP binding | The `rp_hash` public input binds the proof to a specific origin and challenge nonce; a proof generated for one challenge cannot satisfy a different challenge's public inputs. |
 | PKCE | The `code_verifier` binds result redemption to the party that initiated the challenge; a third party cannot claim the result even if it observes the submission. |
 
-Supporting properties. Each row below does not by itself block a replay but bounds the replay window or reinforces a defence layer.
+Supporting properties. These bound the replay window or reinforce a defence layer but do not themselves block replay.
 
 | Supporting property | Effect |
 |---|---|
 | Nonce uniqueness | Each challenge carries a 32 byte CSPRNG nonce; makes `rp_hash` collision-resistant across challenges. |
 | Time bounds | Challenges expire after `CHALLENGE_EXPIRY_SECONDS` (300), bounding the replay window. |
 | Clock skew tolerance | `CLOCK_SKEW_TOLERANCE_SECONDS` (30) prevents clock drift abuse without widening the window materially. |
-| Replay window | Nullifier records persist for `REPLAY_WINDOW_SECONDS` (600) from challenge creation time, preventing late-arriving replays. |
+
+**Ban enforcement.** A separate mechanism. The Verifier maintains a nullifier ban store; any submitted proof whose nullifier appears in the store is rejected. This lets the Verifier block specific credentials that are known to be abusive or compromised, independently of whether any given proof is a replay.
+
+| Ban enforcement | Mechanism |
+|---|---|
+| Nullifier ban store | The Pedersen nullifier is a public input. Verifiers check the nullifier against the ban store and reject on hit. Entries persist for `NULLIFIER_BAN_TTL_SECONDS` (600) by default; persistent bans for compromised credentials are deployment-configurable and MAY extend indefinitely. |
 
 ---
 
@@ -2242,10 +2252,10 @@ Three profiles are defined. An implementation MAY conform to one or more profile
 **Verifier Profile.** An implementation acting as a Parley Verifier MUST implement:
 - Section 7 (Hash Function Specifications)
 - Section 8.6 (RedJubjub Verify, used out of circuit for issuer registry validation if the Verifier supports off circuit signature checks; not strictly required since the in circuit check is the authoritative one)
-- Section 9.4 (Nullifier; for replay store)
+- Section 9.4 (Nullifier; for ban enforcement)
 - Section 12 (Age Verification Circuit; specifically the verifier side)
 - Section 13.1, 13.2, 13.4, 13.6, 13.7, 13.10 (Groth16 parameters, RP hash construction, PKCE validation, public input assembly, VK identification, proof verification)
-- Section 14.2, 14.6, 14.7, 14.9 (Challenge generation, verifier side steps, result redemption, replay protection)
+- Section 14.2, 14.6, 14.7, 14.9 (Challenge generation, verifier side steps, result redemption, replay protection and ban enforcement)
 - Sections 15.6, 15.7, 15.9, 15.10 (public input JSON, RP challenge bytes, challenge record, proof submission payload)
 - Sections 17.5, 17.7, 17.8, 17.10, 17.13 (constant time operations, validation requirements, failure modes, algorithm agility, denial of service considerations)
 
@@ -2420,7 +2430,7 @@ The following failure modes are part of the protocol's failure surface. Implemen
 | Proof verifies to false | `Error::InvalidProof` |
 | Submit secret mismatch | `Error::InvalidSubmitSecret` |
 | RP challenge mismatch | `Error::InvalidChallenge` |
-| Nullifier replay detected | `Error::NullifierReplay` |
+| Nullifier on ban list (credential blocked) | `Error::CredentialBanned` |
 | Challenge expired | `Error::ChallengeExpired` |
 | Challenge already consumed | `Error::ReplayDetected` |
 | `vk_id` not in registry | `Error::UnknownVerifyingKey` |
@@ -2475,7 +2485,7 @@ The protocol does not mandate rate limits but operators MUST consider the follow
 Step 1. challenge_id lookup              // O(1) map lookup
 Step 2. submit_secret constant-time cmp  // O(1) 32-byte compare
 Step 3. rp_challenge constant-time cmp   // O(1) 32-byte compare
-Step 4. nullifier replay lookup          // O(1) map lookup
+Step 4. nullifier ban lookup          // O(1) map lookup
 Step 5. issuer registry lookup           // O(1) map lookup
 Step 6. vk_id registry lookup            // O(1) map lookup
 Step 7. Groth16 verify_proof             // expensive
@@ -2530,7 +2540,7 @@ The following table summarises information learned by each party under correct o
 |---|---|---|
 | Wallet | Nothing about the Verifier or RP beyond what the user observed. Sends Groth16 proof (zero knowledge) and public inputs (age threshold but not age, RP binding, issuer binding, nullifier). | Does NOT send date of birth, name, document number, identity, or Wallet identifier. |
 | Issuance Server | During issuance: date of birth, commitment randomness. Stores audit metadata only (Section 11.3) and credential metadata for revocation purposes if applicable. | Does NOT store date of birth, randomness, or the resulting commitment. |
-| Verifier | That a verification occurred, the binary result, the credential nullifier, the issuer verifying key, the RP origin, the cutoff days and direction the RP requested. Stores keyed-HMAC pseudonyms of IP addresses (see Section 18.5; plain SHA-256 of IPs is forbidden), challenge records (5 minute TTL), nullifier replay store (10 minutes from challenge creation time per `REPLAY_WINDOW_SECONDS`; 90 day audit log retention for verification events). | Does NOT learn the user's date of birth, the credential's actual `iat`/`exp` (those are inside the proof witness), the user's name, or the user's wallet identity. |
+| Verifier | That a verification occurred, the binary result, the credential nullifier, the issuer verifying key, the RP origin, the cutoff days and direction the RP requested. Stores keyed-HMAC pseudonyms of IP addresses (see Section 18.5; plain SHA-256 of IPs is forbidden), challenge records (5 minute TTL), nullifier ban store (10 minutes from challenge creation time per `NULLIFIER_BAN_TTL_SECONDS`; 90 day audit log retention for verification events). | Does NOT learn the user's date of birth, the credential's actual `iat`/`exp` (those are inside the proof witness), the user's name, or the user's wallet identity. |
 | Relying Party | The binary verification result, the cutoff days and direction it itself requested. | Does NOT learn the proof, the public inputs, the user's age, the user's date of birth, the user's wallet identity, or the nullifier. |
 
 Total PII in the verification flow is limited to keyed-HMAC pseudonyms of IP addresses (in Verifier logs, with limited retention; see Section 18.5). Total age related data in the verification flow is zero. The age threshold is set by the RP and is public; the user's actual age is never revealed.
@@ -2543,14 +2553,14 @@ The mechanisms supporting unlinkability are:
 - No persistent user identifier in the protocol; users have no accounts at the Verifier.
 - Each verification request has a fresh challenge with a fresh 32 byte nonce.
 - The proof is zero knowledge; the proof bytes do not depend on the user identity in any way that can be reconstructed.
-- The verifier's nullifier prevents replay but is not linked to the user identity.
+- The Verifier's nullifier enables credential banning but is not linked to the user identity.
 - The Verifier API is stateless from the wallet's perspective; each submission is independent.
 
 ### 18.3 Linkability Within a Single Verifier
 
-Multiple proofs generated by the same Wallet from the same Credential, submitted to the same Verifier, present the same nullifier. The Verifier MAY use this to detect repeat verifications. This is intentional and supports double spend prevention; it does not link the verifications to the user identity.
+Multiple proofs generated by the same Wallet from the same Credential, submitted to the same Verifier, present the same nullifier. The Verifier MAY use this to recognise repeat verifications from the same credential. This is intentional and supports credential ban enforcement; it does not link the verifications to the user identity.
 
-If a Wallet wishes to be unlinkable across verifications at the same Verifier within the replay window, it would need a different credential with a different commitment. Parley does not currently support multiple credentials per user with unlinkable nullifiers; this is a possible v2.0 feature.
+If a Wallet wishes to be unlinkable across verifications at the same Verifier within the `NULLIFIER_BAN_TTL_SECONDS` window, it would need a different credential with a different commitment. Parley does not currently support multiple credentials per user with unlinkable nullifiers; this is a possible v2.0 feature.
 
 ### 18.4 Cross-Verifier Linkability of Nullifiers
 
@@ -2951,7 +2961,7 @@ Alice attempts to access an age restricted website. The site asks "are you over 
 5. The wallet computes `nullifier = PedersenNullifier(c)` and `rp_hash = Blake2s-256(rp_challenge)`.
 6. The wallet generates a Groth16 proof. After approximately 5 seconds of CPU on her phone, the proof is ready.
 7. The wallet posts `{ challenge_id, submit_secret, proof, vk_id = 2031517468, cutoff_days = 11246, rp_challenge, issuer_vk, nullifier }` to the Verifier.
-8. The Verifier loads the challenge record, validates submit_secret in constant time, validates the rp_challenge in constant time, recomputes rp_hash, looks up the issuer DMV CA in its allowlist, looks up vk_id 2031517468 in its registry, checks the nullifier replay store (none found, inserts), assembles the public inputs, and runs `bellman::groth16::verify_proof`. The result is true.
+8. The Verifier loads the challenge record, validates submit_secret in constant time, validates the rp_challenge in constant time, recomputes rp_hash, looks up the issuer DMV CA in its allowlist, looks up vk_id 2031517468 in its registry, checks the nullifier ban store (none found, inserts), assembles the public inputs, and runs `bellman::groth16::verify_proof`. The result is true.
 9. The Verifier marks the challenge consumed and records the result.
 10. The RP polls the Verifier with the PKCE `code_verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"`. The Verifier validates `SHA-256(code_verifier)` matches the stored code_challenge in constant time, and returns the verification result `{ ok: true, cutoff_days: 11246, direction: Over }`.
 11. The RP grants Alice access.
