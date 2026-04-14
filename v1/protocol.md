@@ -18,7 +18,7 @@
 
 Parley is a zero knowledge protocol for age-threshold verification. A holder with a date of birth credential, issued once by an authorised identity provider, proves to a Verifier that the committed date of birth satisfies an age threshold: either a minimum (for example "at least 18 years old") or a maximum (for example "under 13 years old"). The Verifier returns a binary pass/fail result to the Relying Party that initiated the verification; the Relying Party receives only this result and never sees the proof or any of its public inputs. The Verifier sees the proof and its public inputs, including a per-credential nullifier used to maintain a ban list for abusive or compromised credentials, but does not learn the date of birth, the credential signature, the holder's identity, or any other attribute bound into the credential. The Issuer is not contacted at verification time.
 
-A single arithmetic circuit evaluates both directions via a public selector bit that conditions operand ordering, so one proving key and one verifying key cover both predicates per circuit version. Proofs are 192 bytes. The protocol uses Groth16 over BLS12-381 with a Jubjub-embedded credential signature based on RedJubjub, Pedersen commitments for the date of birth, Ed25519 attestations from identity providers, and Blake2s-256 and SHA-256 for hashing. Groth16 requires a per-circuit trusted setup (Section 17.3). None of the cryptographic primitives used here is post-quantum secure; this specification assumes a pre-quantum threat model.
+A single arithmetic circuit evaluates both directions via a public selector bit that conditions operand ordering, so one proving key and one verifying key cover both predicates for a given circuit version; trusted-setup rotation or a circuit-constants bump produces a new key pair (Section 6.4, Section 13.7). Proofs are 192 bytes. The protocol uses Groth16 over BLS12-381 with a Jubjub-embedded credential signature based on RedJubjub, Pedersen commitments for the date of birth, Ed25519 attestations from identity providers, and Blake2s-256 and SHA-256 for hashing. Groth16 requires a per-circuit trusted setup (Section 17.3). None of the cryptographic primitives used here is post-quantum secure; this specification assumes a pre-quantum threat model. Section 17.3 describes the integrity dependency on the trusted-setup ceremony and the operator's transcript publication obligations.
 
 This document specifies the normative cryptographic constructions, wire formats, protocol flows, and conformance requirements. Interoperability across implementations is demonstrated via the normative test vectors in Appendix A. Privacy properties are discussed in Section 18.
 
@@ -28,7 +28,7 @@ This document specifies the normative cryptographic constructions, wire formats,
 
 This document is a stable, version 1.0.0 specification of the Parley age verification protocol, published by Maelstrom AI Pty Ltd. It is intended for cryptographic engineers, security auditors, wallet implementers, verifier operators, identity issuers, and integrators of age verification into web and mobile services.
 
-The version number is fixed for the lifetime of this document. Backward incompatible changes will be published as v2.0 or later. Backward compatible additions, where possible, will be published as v1.1, v1.2, and so on. Errata that do not change normative behaviour will be filed at the errata URL above and reflected in patch revisions of this document with the same version number.
+The version number is fixed for the lifetime of this document. Backward incompatible changes are published as v2.0 or later. Backward compatible additions, where possible, are published as v1.1, v1.2, and so on. Errata that do not change normative behaviour are filed at the errata URL above and reflected in patch revisions of this document with the same version number.
 
 To cite this specification, use:
 
@@ -36,7 +36,7 @@ To cite this specification, use:
 
 To report errata, file an issue at the errata URL with the section number, the line of text in question, and a reproduction or pointer to the relevant source artefact. Errata that affect security MUST be reported privately to security@parleywallet.app before public disclosure.
 
-This document is normative. Where the prose conflicts with the open source reference implementation, the prose in this document governs the protocol; the implementation will be updated to match. Where the prose contains errors of fact about cryptographic primitives borrowed from other specifications ([ZcashSapling], [RFC7693], [RFC8032], [RFC7636]), those external specifications govern.
+This document is normative. Where the prose conflicts with the open source reference implementation, the prose in this document governs the protocol; the implementation shall be updated to match. Where the prose contains errors of fact about cryptographic primitives borrowed from other specifications ([ZcashSapling], [RFC7693], [RFC8032], [RFC7636]), those external specifications govern.
 
 ---
 
@@ -95,9 +95,9 @@ If You institute patent litigation against Maelstrom AI Pty Ltd or any other imp
 
 Age restriction is a common requirement in online services: alcohol, gambling, adult content, financial products, and increasingly, mainstream social platforms. The default approach is to ask the user for a copy of a government issued identity document, or to delegate the check to a third party that does so. Both approaches transfer a complete identity record, including name, photograph, address, and document number, in order to answer a single question whose true answer is one bit: is the user old enough.
 
-The asymmetry is severe. The relying party only needs the bit. The user pays in identity exposure, ongoing breach risk, and the loss of a clean separation between unrelated services. The verifier, who must store some record to satisfy regulators, accumulates a high value target.
+The asymmetry is severe. The Relying Party only needs the bit. The user pays in identity exposure, ongoing breach risk, and the loss of a clean separation between unrelated services. The verifier, who must store some record to satisfy regulators, accumulates a high value target.
 
-Parley is a protocol that returns to the relying party only the answer to the age question. The user's wallet holds a credential issued once by an authorised identity provider. For each verification request, the wallet generates a zero knowledge proof that the credential commits to a date of birth satisfying the age predicate. The relying party learns the bit and a unique nullifier sufficient for double spend prevention. It learns no date of birth, no document number, no identity. The verifier sees only the proof and the public inputs to the circuit; it cannot recover any identifier from them.
+Parley is a protocol that returns to the Relying Party only the answer to the age question. The user's wallet holds a credential issued once by an authorised identity provider. For each verification request, the wallet generates a zero knowledge proof that the credential commits to a date of birth satisfying the age predicate. The Relying Party learns the bit and a unique nullifier sufficient for double spend prevention. It learns no date of birth, no document number, no identity. The verifier sees only the proof and the public inputs to the circuit; it cannot recover any identifier from them.
 
 ### 1.2 Approach
 
@@ -105,7 +105,7 @@ Parley is built on three cryptographic ideas, each well established. First, a Pe
 
 A separate Ed25519 signature, produced by the identity provider, attests to the date of birth at issuance time. The wallet relays this attestation to the issuance server, which verifies it before computing the Pedersen commitment server side. The wallet supplies the randomness; the server supplies the attested date of birth. Neither party can produce a credential committing to a date of birth different from the one the identity provider attested to.
 
-The protocol operates entirely without persistent user accounts at the verifier. Each verification request begins with a fresh challenge containing a 32 byte nonce, an origin string, an age threshold, and a PKCE code challenge. The wallet returns a proof bound to that challenge. Replay is prevented by short challenge expiry, single use challenge consumption, and a 32 byte submit secret returned only to the relying party. A deterministic per credential nullifier is also emitted as a public input; this is used by the Verifier for credential ban enforcement, not for replay prevention.
+The protocol operates entirely without persistent user accounts at the verifier. Each verification request begins with a fresh challenge containing a 32 byte nonce, an origin string, an age threshold, and a PKCE code challenge. The wallet returns a proof bound to that challenge. Replay is prevented by short challenge expiry, single use challenge consumption, and a 32 byte submit secret returned only to the Relying Party. A deterministic per credential nullifier is also emitted as a public input; this is used by the Verifier for credential ban enforcement, not for replay prevention.
 
 ### 1.3 Three Party Model
 
@@ -133,6 +133,8 @@ This document also does not specify the identity proofing process used by an Iss
 
 This document does not specify storage formats for wallet credentials beyond the requirement that the wallet preserve the credential, the date of birth, and the commitment randomness across proof generations. Implementations are expected to store these in platform secure storage (for example, the iOS Keychain or the Android Keystore).
 
+Parley is distinct from W3C Verifiable Credentials [W3CVC] and ISO/IEC 18013-5 mobile driving licence [ISO18013-5]; see those specifications for their respective scopes. Parley's credential format is purpose specific and targets a different deployment model.
+
 ### 1.6 Document Structure
 
 Section 2 establishes terminology and the requirements language used throughout. Section 3 presents an architectural overview of the protocol with diagrams. Sections 4 through 10 specify cryptographic primitives. Sections 11 through 14 specify protocol flows. Section 15 consolidates wire formats. Section 16 defines conformance. Sections 17 and 18 address security and privacy. Section 20 lists references. The appendices contain test vectors, worked examples, language specific data structure definitions, dependency versions, deviations from Zcash, acknowledgements, and author contact details.
@@ -153,15 +155,21 @@ The following terms are used throughout this document with the precise meanings 
 
 **Attestation.** A signed statement by an Issuer asserting a particular date of birth for a Wallet at a particular point in time. In Parley, attestations are signed with Ed25519. See Section 10.
 
-**Cutoff Days.** A signed 32 bit integer giving a date as the count of days since the Unix epoch (1970-01-01 UTC). Used as the age threshold in a verification request. A user is "Over" the threshold when `cutoff_days >= dob_days` and "Under" the threshold when `dob_days >= cutoff_days`.
+**`challenge_id`.** The identifier assigned by the Verifier to a newly minted challenge. A UUIDv4 in its 36-character canonical hyphenated form ([RFC9562]). Used by the Wallet when submitting a proof (Section 14.5) and by the Relying Party when redeeming the result (Section 14.7).
 
 **Commitment.** A 32 byte compressed Jubjub point produced by the Pedersen commitment construction in Section 9. Hides a date of birth and 128 bits of randomness. Computed by the Issuance Server during issuance and embedded in the Credential. The opening (date of birth and randomness) is held only by the Wallet.
 
 **Credential.** The signed object returned by the Issuance Server to the Wallet at the end of issuance. Contains a version byte, key identifier, commitment, issued at and expires at timestamps, a schema identifier, the issuer verifying key, and a RedJubjub signature over the credential prehash.
 
-**Direction Bit.** A single Boolean public input to the age verification circuit. `1` selects the Over comparison, `0` selects the Under comparison. The circuit is identical for both directions; only the conditional swap inputs change.
+**Cutoff Days.** A signed 32 bit integer giving a date as the count of days since the Unix epoch (1970-01-01 UTC). Used as the age threshold in a verification request. A user is "Over" the threshold when `cutoff_days >= dob_days` and "Under" the threshold when `dob_days >= cutoff_days`.
+
+**Direction Bit.** A single Boolean public input to the age verification circuit. `1` (true) selects the Over comparison; `0` (false) selects the Under comparison. The circuit is identical for both directions; only the conditional swap inputs change.
+
+**`dob_days`.** A signed 32 bit integer representing the attested date of birth as the count of days since the Unix epoch (1970-01-01 UTC). Negative values represent pre-1970 dates. Appears in the Ed25519 attestation (Section 10.2) and in the Wallet witness (Section 12.4). Bounded to `[-73050, +7305]` at issuance; see Section 10.2.
 
 **Domain Separation Tag (DST).** A constant byte string included in a hash or signature input to ensure that outputs of one protocol step cannot be confused with outputs of another. Section 5 enumerates all DSTs.
+
+**Identity Provider (IdP).** The external party that proofs the user's identity and determines the date of birth that will be attested to. The IdP MAY sign the Ed25519 attestation directly (alternative embodiment, Section 10.1) or pass the verified `dob_days` to the Issuance Server over an authenticated channel (preferred embodiment). The IdP is out of scope for cryptographic conformance; its proofing process is governed by the Issuer's regulatory environment.
 
 **Issuance Server.** The server operated by an Issuer that receives an attestation plus wallet randomness, computes a Pedersen commitment, and returns a RedJubjub signed Credential.
 
@@ -179,19 +187,25 @@ The following terms are used throughout this document with the precise meanings 
 
 **Public Inputs.** The eight BLS12-381 scalar field elements supplied to the Groth16 verifier alongside the proof. They are the multipacked encoding of the direction bit, biased cutoff days, RP hash, issuer verifying key, and credential nullifier (Section 12.3).
 
+**`r_bits`.** The 128-bit commitment randomness sampled by the Wallet during issuance and supplied to the Pedersen commitment (Section 9.1). Stored by the Wallet in platform secure storage alongside `dob_days` and the SignedCredential; never transmitted after issuance. The circuit accepts exactly 128 bits (Section 9.3 Profile A).
+
 **Relying Party (RP).** The party that consumes the verification result. The RP requests a challenge from the Verifier, presents it to the Wallet (typically via QR code or deep link), and redeems the result via PKCE.
+
+**`rp_challenge`.** The 32 byte SHA-256 digest of `origin || nonce || CHALLENGE_DST` (Section 13.2 step 1). Minted by the Verifier, transmitted through the Relying Party to the Wallet, and relayed by the Wallet back to the Verifier in the proof submission (Section 14.5). Distinct from `rp_hash`, which is the Blake2s-256 wrap of `rp_challenge` consumed as a circuit public input.
 
 **RP Hash.** A 32 byte value used as a circuit public input that binds the proof to a specific challenge. Computed in two steps: a SHA-256 of `origin || nonce || "zerokp.challenge.v1"`, then a Blake2s-256 wrap of that 32 byte SHA-256 output. See Section 13.2.
 
 **Submit Secret.** A 32 byte CSPRNG sourced token issued by the Verifier alongside a challenge. The Verifier returns it only to the RP. The Wallet receives it through the RP and includes it in the proof submission. Constant time comparison against the stored value gates the submission.
 
-**Verifier.** The server that verifies Groth16 proofs against an issuer key registry, enforces challenge expiry and nullifier deduplication, and notifies the Relying Party of the verification result via PKCE redemption.
+**Verifier.** The server that verifies Groth16 proofs against an issuer key registry, enforces challenge expiry and nullifier deduplication, and notifies the Relying Party of the verification result via PKCE redemption. The Verifier role MAY be co-located with the Relying Party or operated as a separate service; Section 3.5 discusses the trust implications of each topology.
 
 **Verifying Key (VK).** Two distinct keys are referred to by similar names in this document; context disambiguates.
 
 (a) The *Issuer Verifying Key* (`issuer_vk`) is a 32 byte compressed Jubjub point that verifies RedJubjub signatures on Credentials. It is a circuit public input.
 
 (b) The *Groth16 Verifying Key* is a Bellman serialised verifying key (1732 bytes for the current circuit) used by the Verifier to verify proofs. It is identified by a 32 bit `vk_id`.
+
+**`vk_id`.** A 32 bit identifier for a Groth16 verifying key, derived via Section 13.7. Embedded in every proof submission (Section 14.5) so the Verifier can route the proof to the correct verifying key in its `VK_REGISTRY`. The v1.0 production `vk_id` is `2031517468`.
 
 **Wallet.** The user controlled software (typically mobile) that stores Credentials, generates Proofs, and performs the Wallet side steps of the protocol.
 
@@ -255,9 +269,9 @@ The wire format MUST use base64url with no padding for binary fields embedded in
 
 ## 3. Protocol Overview
 
-### 3.1 Three Party Architecture
+### 3.1 Protocol Parties
 
-Parley involves three primary parties (Issuer, Wallet, Verifier) and one consumer (Relying Party). The wallet holds the user's credential and is the only party that ever sees the date of birth in cleartext after issuance. The Issuer attests to dates of birth and signs credentials. The Verifier verifies proofs against an issuer key registry on behalf of relying parties.
+Parley involves three primary parties (Issuer, Wallet, Verifier) and one consumer (Relying Party). The wallet holds the user's credential and is the only party that ever sees the date of birth in cleartext after issuance. The Issuer attests to dates of birth and signs credentials. The Verifier verifies proofs against an issuer key registry on behalf of Relying Parties.
 
 ```
                    +--------------------+
@@ -402,7 +416,7 @@ The following are out of scope for this specification.
 - The IdP's identity proofing process. The Issuer is responsible for ensuring that any dates of birth it attests to correspond to real, verified individuals.
 - Network transport details. TLS 1.3 is RECOMMENDED but the cryptographic protocol is transport agnostic.
 - Wallet user interface design. The protocol is silent on how the wallet presents proof generation requests to the user, except to the extent that it RECOMMENDS user consent for each verification.
-- Credit and metering systems used by Issuers and Verifiers to bill relying parties. Such systems are operational concerns layered above this protocol.
+- Credit and metering systems used by Issuers and Verifiers to bill Relying Parties. Such systems are operational concerns layered above this protocol.
 - Operational deployment platform details (Cloudflare Workers, AWS, others). The protocol is platform agnostic.
 - The Issuer's own access control on its RedJubjub credential signing key. The protocol assumes the key is in the Issuer's sole possession and is rotated at the Issuer's discretion.
 
@@ -422,7 +436,7 @@ BLS12-381 is the pairing friendly elliptic curve used as the SNARK backend for G
 | Scalar field bit length | 255 bits (capacity 254 bits for multipack) |
 | Reference library | `bls12_381` crate, version 0.8 |
 
-Implementations MUST use BLS12-381 with the parameters specified in [PairingCurves]. Verifying keys SHALL be encoded using the canonical encoding produced by `bellman::groth16::VerifyingKey::write`, which emits a mix of compressed G1 and G2 encodings per the Bellman format (1732 bytes total for the v1.0 deployed VK). Proofs SHALL be encoded using `bellman::groth16::Proof::write`, which uses the compressed Bellman serialisation (see Section 15.5).
+Implementations MUST use BLS12-381 with the parameters specified in [PairingCurves]. Verifying keys SHALL be encoded using the canonical encoding produced by `bellman::groth16::VerifyingKey::write`, which emits a mix of compressed G1 and G2 encodings per the Bellman 0.14 format [Bellman] (1732 bytes total for the v1.0 deployed VK). Proofs SHALL be encoded using `bellman::groth16::Proof::write`, which uses the compressed Bellman serialisation [Bellman] (see Section 15.5).
 
 ### 4.2 Jubjub
 
@@ -439,6 +453,8 @@ Jubjub is a twisted Edwards curve embedded in the BLS12-381 scalar field. Embedd
 | Reference library | `jubjub` crate, version 0.10 |
 
 All Parley operations on Jubjub are restricted to the prime order subgroup. Implementations MUST reject points outside the prime order subgroup at deserialisation. Specifically, a 32 byte input intended to be a Jubjub point MUST decode via `SubgroupPoint::from_bytes` (or equivalent) and MUST be rejected if the decoder reports the point is not in the prime order subgroup, is the identity, or is in canonical encoding range error.
+
+A 32 byte scalar encoding is **canonical** iff it encodes an integer strictly less than `r_J`. The canonical range check is used throughout this specification (for example, Section 8.1) to reject out-of-range scalars at deserialisation.
 
 The cofactor 8 means the full Jubjub curve has eight times as many points as the prime order subgroup. Use of the prime order subgroup eliminates small subgroup attacks.
 
@@ -495,7 +511,6 @@ The following DSTs are used by conforming v1.0 implementations.
 | `CHALLENGE_ID_DST` | `challenge_id_v1` | 15 | `6368616c6c656e67655f69645f7631` | Challenge identifier derivation |
 | `DOB_ATTESTATION_DST` | `parley.attestation.dob.v1` | 25 | `7061726c65792e6174746573746174696f6e2e646f622e7631` | Ed25519 attestation message (Section 10.2) |
 | `VK_ID_DST` | `zerokp.vk.id.v1` | 15 | `7a65726f6b702e766b2e69642e7631` | Groth16 verifying key identifier derivation (Section 13.7) |
-| `ISSUER_VK_DST` | `zerokp.issuer.vk.v1` | 19 | `7a65726f6b702e6973737565722e766b2e7631` | Issuer verifying key context, used by Verifier and Wallet |
 | `PARLEY_RJ_PERSONALIZATION` | `ParleyRJ` | 8 | `5061726c6579524a` (the eight bytes `50 61 72 6c 65 79 52 4a`) | Blake2s personalisation for the RedJubjub challenge hash (Section 8.4) |
 | `PARLEY_RJ_NONCE_TAG` | `ParleyRJ/nonce` | 14 | `5061726c6579524a2f6e6f6e6365` (the 14 bytes `50 61 72 6c 65 79 52 4a 2f 6e 6f 6e 63 65`) | Prefix for RedJubjub nonce derivation (Section 8.3) |
 
@@ -518,7 +533,7 @@ Source citation: `sapling-crypto-0.5.0/src/pedersen_hash.rs:22-27` (upstream `Pe
 
 ### 5.3 DST Uniqueness
 
-The active DSTs in Section 5.1 are byte distinct and no two share a prefix. Implementations MAY rely on this property. Future revisions of this specification will preserve byte distinctness and prefix freedom; new DSTs will be chosen such that they are neither a prefix nor an extension of any existing DST.
+The active DSTs in Section 5.1 are byte distinct and no two share a prefix. Implementations MAY rely on this property. Future revisions of this specification preserve byte distinctness and prefix freedom; new DSTs are chosen such that they are neither a prefix nor an extension of any existing DST.
 
 ---
 
@@ -530,7 +545,6 @@ The active DSTs in Section 5.1 are byte distinct and no two share a prefix. Impl
 |---|---|---|---|
 | `CHALLENGE_EXPIRY_SECONDS` | 300 | seconds | Challenge validity window (5 minutes) |
 | `CLOCK_SKEW_TOLERANCE_SECONDS` | 30 | seconds | Generic clock drift allowance |
-| `NULLIFIER_BAN_TTL_SECONDS` | 600 | seconds | Duration a nullifier remains in the Verifier's ban store after a verification, measured from challenge creation time. Used for credential ban enforcement; not a replay-protection mechanism. |
 | `SESSION_TIMEOUT_SECONDS` | 120 | seconds | Issuance session timeout (2 minutes) |
 | `ATTESTATION_MAX_AGE_SECONDS` | 3600 | seconds | Ed25519 attestation freshness window (1 hour) |
 | `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS` | 60 | seconds | Maximum permitted clock skew when an attestation timestamp is ahead of local time |
@@ -542,8 +556,9 @@ The `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS = 60` value differs from the gener
 
 **Invariants.** Implementations MUST satisfy:
 - `CHALLENGE_EXPIRY_SECONDS > CLOCK_SKEW_TOLERANCE_SECONDS`
-- `NULLIFIER_BAN_TTL_SECONDS >= CHALLENGE_EXPIRY_SECONDS + CLOCK_SKEW_TOLERANCE_SECONDS` (600 ≥ 330 satisfies this by design)
 - `ATTESTATION_MAX_AGE_SECONDS > ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS`
+- `SESSION_TIMEOUT_SECONDS > 0`
+- `MAX_VALIDITY_SECONDS > 0`
 
 These values are normative for v1.0 and changing any of them produces a different protocol version.
 
@@ -554,7 +569,6 @@ These values are normative for v1.0 and changing any of them produces a differen
 | `NONCE_SIZE` | 32 | bytes | Challenge nonce length |
 | `CREDENTIAL_ID_SIZE` | 32 | bytes | Credential identifier length |
 | `MAX_CREDENTIAL_SIZE` | 8192 | bytes | Maximum serialised credential |
-| `MAX_RANGE_PROOF_SIZE` | 1024 | bytes | Reserved (range proof maximum, currently unused) |
 | `KID_SIZE_BYTES` | 14 | bytes | Fixed key identifier byte length (in circuit) |
 | `SCHEMA_SIZE_BYTES` | 12 | bytes | Fixed credential schema byte length (in circuit) |
 | `MIN_PEDERSEN_RANDOMNESS_BITS` | 128 | bits | Minimum r_bits length accepted by `validate_commitment_randomness` |
@@ -562,9 +576,9 @@ These values are normative for v1.0 and changing any of them produces a differen
 | `MIN_UNIQUE_BYTES_R_BITS` | 8 | bytes | Minimum count of unique byte values across packed r_bits (entropy floor) |
 | `SUBMIT_SECRET_SIZE` | 32 | bytes | Anti-spam submission token length (Section 14.2) |
 
-All size constants are normative for v1.0. `MIN_UNIQUE_BYTES_R_BITS` and `SUBMIT_SECRET_SIZE` are **spec defined conformance requirements**. They appear as literals in the reference implementation (the bare `>= 8` entropy floor in `parley-crypto/crypto-commit/src/lib.rs:229` and the `[u8; 32]` submit secret type used throughout the verifier-api) rather than as exported named constants. Future versions of the reference implementation may promote them to named constants for clarity; the numeric values are normative regardless of how they are expressed in code.
+All size constants are normative for v1.0. `MIN_UNIQUE_BYTES_R_BITS` and `SUBMIT_SECRET_SIZE` are normative values defined by this specification regardless of whether the reference implementation exports them as named constants.
 
-Source citations: `parley-crypto/crypto-commons/src/constants.rs` (`MIN_PEDERSEN_RANDOMNESS_BITS`, `MAX_PEDERSEN_RANDOMNESS_BITS`, `NONCE_SIZE`, `CREDENTIAL_ID_SIZE`, `MAX_CREDENTIAL_SIZE`, `MAX_RANGE_PROOF_SIZE`, `KID_SIZE_BYTES`, `SCHEMA_SIZE_BYTES`), `wallet-sdk/crates/core/src/issuance.rs:24` (`R_BITS_LEN`; referenced from Section 9.3), `parley-crypto/crypto-prover/src/lib.rs:1491` (hard-coded `128` length check on the prover side), `parley-crypto/crypto-circuit-age/src/lib.rs:306` (hard-coded `128` length check inside the circuit), `parley-crypto/crypto-commit/src/lib.rs:229` (literal `>= 8` unique-byte check).
+Source citations: `parley-crypto/crypto-commons/src/constants.rs` (`MIN_PEDERSEN_RANDOMNESS_BITS`, `MAX_PEDERSEN_RANDOMNESS_BITS`, `NONCE_SIZE`, `CREDENTIAL_ID_SIZE`, `MAX_CREDENTIAL_SIZE`, `KID_SIZE_BYTES`, `SCHEMA_SIZE_BYTES`), `wallet-sdk/crates/core/src/issuance.rs:24` (`R_BITS_LEN`; referenced from Section 9.3), `parley-crypto/crypto-prover/src/lib.rs:1491` (hard-coded `128` length check on the prover side), `parley-crypto/crypto-circuit-age/src/lib.rs:306` (hard-coded `128` length check inside the circuit), `parley-crypto/crypto-commit/src/lib.rs:229` (literal `>= 8` unique-byte check).
 
 ### 6.3 Bias Constant
 
@@ -696,8 +710,7 @@ Encoding:
 Implementations MUST sample `sk` from a cryptographically secure pseudorandom number generator. Implementations MUST reject the zero scalar (which would produce `VK = identity`). Implementations MUST reject any `sk` outside the canonical range of `Fr_J`.
 
 **Validation on deserialisation:**
-- `SigningKey::from_bytes(sk_bytes)` MUST reject non canonical encodings without branching on the secret.
-- `SigningKey::from_bytes(sk_bytes)` MUST reject the all zero encoding.
+- `SigningKey::from_bytes(sk_bytes)` MUST reject non canonical encodings without branching on the secret, and MUST reject the all zero encoding.
 - `VerificationKey::from_bytes(vk_bytes)` MUST reject any input that does not decode to a Jubjub prime order subgroup point. Specifically, the small order subgroup MUST be rejected.
 
 Source citation: `parley-crypto/crypto-sig-redjubjub/src/lib.rs:97-105`, `lib.rs:181-187`.
@@ -789,7 +802,7 @@ Encoding:
                                           // 32 + 32 = 64 bytes
 ```
 
-The Issuance Server SHOULD verify the signature it has just produced as a self check before returning the SignedCredential to the wallet. This catches misconfigured CSPRNGs, key corruption, and library version skew at issuance time rather than at verification time.
+The Issuance Server MUST verify the signature it has just produced (see Section 11.2 Step 8) as a self check before returning the SignedCredential to the wallet. This catches misconfigured CSPRNGs, key corruption, and library version skew at issuance time rather than at verification time.
 
 Source citation: `parley-crypto/crypto-sig-redjubjub/src/lib.rs:277-412`.
 
@@ -808,10 +821,10 @@ Verify(VK, cred, sig):
     c        = ChallengeHash(compress(R), compress(VK), msg_hash)
     LHS      = [s] G
     RHS      = R + [c] VK
-    return LHS == RHS                     // u/v coordinate equality, constant time
+    return LHS == RHS                     // u/v coordinate equality
 ```
 
-Implementations MUST check `R` and `s` for canonicality before the algebraic check. The point comparison MUST be constant time (use `subtle::ConstantTimeEq` in Rust, or equivalent). Failure modes (non canonical, identity, small subgroup, point equality false) MUST all return the same `false` result without leaking which check failed.
+Implementations MUST check `R` and `s` for canonicality before the algebraic check. The point comparison MUST use constant-time primitives (e.g. `subtle::ConstantTimeEq`) even though neither operand is secret, to avoid leaking which intermediate check failed during non-conforming input handling. Failure modes (non canonical, identity, small subgroup, point equality false) MUST all return the same `false` result without leaking which check failed.
 
 Source citation: `parley-crypto/crypto-sig-redjubjub/src/lib.rs:332-357`.
 
@@ -831,7 +844,7 @@ Implementations MUST NOT log, debug print, or serialise secret keys outside of s
 
 ### 9.1 Commitment
 
-The Pedersen commitment hides a date of birth using the Sapling Pedersen hash with the `NoteCommitment` personalisation.
+The Pedersen commitment [Pedersen1991] hides a date of birth using the Sapling Pedersen hash with the `NoteCommitment` personalisation.
 
 ```
 PedersenCommit(dob_days, r_bits):
@@ -853,7 +866,8 @@ PedersenCommit(dob_days, r_bits):
 **Properties:**
 - *Perfectly hiding.* For any commitment `C` and any candidate `dob_days` `m`, there exists `r` such that `PedersenCommit(m, r) = C`. The commitment reveals no information about the committed value.
 - *Computationally binding.* Under the discrete log assumption on Jubjub, an adversary cannot find two distinct openings `(m1, r1) != (m2, r2)` with `PedersenCommit(m1, r1) == PedersenCommit(m2, r2)`.
-- *Circuit compatible.* The off circuit construction matches the in-circuit Pedersen commitment gadget bit for bit.
+
+The construction is also circuit compatible: the off circuit code matches the in-circuit Pedersen commitment gadget bit for bit, so any commitment produced off circuit will open correctly inside the age circuit of Section 12.
 
 ### 9.2 Bias of the Date of Birth
 
@@ -865,11 +879,15 @@ For example, `bias(-3653) = 2147479995`, `bias(0) = 2147483648 = 0x80000000`, an
 
 Before computing a commitment, randomness MUST be validated to defend against accidental supply of weak randomness. The validation rules are defence in depth measures, not cryptographic requirements; a properly seeded CSPRNG satisfies them with overwhelming probability.
 
-Two validation profiles apply depending on the caller:
+Two validation profiles apply depending on the caller.
 
-**Profile A (circuit path, wallet and issuance server).** Any `r_bits` fed into `pedersen_commit_dob` or any other value that will be consumed by the v1.0 age circuit MUST satisfy `len(r_bits) == R_BITS_LEN` (128 bits). This is a hard equality: the circuit only accepts exactly 128 bits of randomness (the named constant lives at `wallet-sdk/crates/core/src/issuance.rs:24`; the prover and the circuit perform independent hard-coded `128` length checks at `parley-crypto/crypto-prover/src/lib.rs:1491` and `parley-crypto/crypto-circuit-age/src/lib.rs:306` respectively). Inputs that do not match MUST be rejected and MUST NOT be truncated or padded.
+#### 9.3.1 Profile A (Circuit Path, Wallet, and Issuance Server)
 
-**Profile B (standalone commitment helper).** The general purpose `validate_commitment_randomness` helper (exposed for uses outside the v1.0 age circuit, for instance test tooling or future circuits that accept longer randomness) enforces a lower bound of `MIN_PEDERSEN_RANDOMNESS_BITS` (≥ 128 bits) and an upper bound of `MAX_PEDERSEN_RANDOMNESS_BITS` (1096 bits). Lengths below 128 bits MUST be rejected. Lengths above 1096 bits MUST be rejected.
+Any `r_bits` fed into `pedersen_commit_dob` or any other value that will be consumed by the v1.0 age circuit MUST satisfy `len(r_bits) == R_BITS_LEN` (128 bits). This is a hard equality: the circuit only accepts exactly 128 bits of randomness (the named constant lives at `wallet-sdk/crates/core/src/issuance.rs:24`; the prover and the circuit perform independent hard-coded `128` length checks at `parley-crypto/crypto-prover/src/lib.rs:1491` and `parley-crypto/crypto-circuit-age/src/lib.rs:306` respectively). Inputs that do not match MUST be rejected and MUST NOT be truncated or padded.
+
+#### 9.3.2 Profile B (Standalone Commitment Helper)
+
+The general purpose `validate_commitment_randomness` helper (exposed for uses outside the v1.0 age circuit, for instance test tooling or future circuits that accept longer randomness) enforces a lower bound of `MIN_PEDERSEN_RANDOMNESS_BITS` (≥ 128 bits) and an upper bound of `MAX_PEDERSEN_RANDOMNESS_BITS` (1096 bits). Lengths below 128 bits MUST be rejected. Lengths above 1096 bits MUST be rejected.
 
 In both profiles:
 
@@ -1007,7 +1025,7 @@ Source citation: `parley-crypto/crypto-commons/src/attestation.rs:220`.
 
 A conforming Issuance Server MUST track attestation nonces and reject any nonce it has already accepted within the freshness window. The nonce is 32 bytes from a CSPRNG, so collisions are negligible; any apparent reuse is treated as a replay attempt.
 
-The nonce store MAY be evicted after `ATTESTATION_MAX_AGE_SECONDS` since beyond that window the attestation will be rejected for freshness in any case.
+The nonce store MAY be evicted after `ATTESTATION_MAX_AGE_SECONDS` since beyond that window the attestation is rejected for freshness in any case.
 
 Normatively, the single-use guarantee requires an atomic check-and-set on the nonce store: concurrent requests presenting the same nonce MUST NOT both succeed. Eventually-consistent stores that permit a TOCTOU window between read and write MUST NOT be used for this purpose unless an independent single-writer coordinator is interposed.
 
@@ -1131,10 +1149,10 @@ Step 12. The Wallet MUST verify the received credential before
             a. Recompute c' = PedersenCommit(stored dob_days,
                stored r_bits) and confirm c' == credential.c
                in constant time.
-            b. Resolve issuer_vk through the Wallet's local issuer
-               registry (Section 11.5) using (issuer_id, kid), if
-               a registry is present. Reject if the pair is
-               explicitly marked Revoked.
+            b. If the Wallet maintains an issuer registry (Section
+               11.5), resolve issuer_vk through it using (issuer_id,
+               kid). Reject if the pair is explicitly marked Revoked.
+               Wallets without a registry skip this step.
             c. Verify the RedJubjub signature on the credential
                prehash (Section 8.6). Where a registry is present
                the signature MUST be verified against the
@@ -1171,7 +1189,7 @@ The Issuance Server MUST NOT retain `dob_days`, `r_bits`, the commitment, or the
 | Validity period (`iat`, `exp`) | When the credential expires |
 | Schema identifier | Credential schema |
 
-Audit log retention SHOULD be at most 90 days after issuance unless a longer period is required by applicable regulation. Audit log entries MUST NOT enable reconstruction of the user's date of birth.
+Audit log retention MUST NOT exceed 90 days after issuance unless a longer period is required by applicable regulation. Audit log entries MUST NOT enable reconstruction of the user's date of birth.
 
 ### 11.4 Wallet Storage
 
@@ -1206,7 +1224,7 @@ write_length_prefixed(h, data):
     h.update(data)
 ```
 
-Implementations MUST reject inputs whose length exceeds `u32::MAX` (4 294 967 295). The v1.0 `rp_challenge` preimage does NOT use this helper (see Section 13.2); the attestation preimage in Section 10.2 uses single-byte length prefixes for `issuer_id`, `session_id`, and `client_id`. The helper is provided for internal consistency and for use by future protocol versions.
+Implementations MUST reject inputs whose length exceeds `u32::MAX` (4 294 967 295). The v1.0 `rp_challenge` preimage does NOT use this helper (see Section 13.2); the attestation preimage in Section 10.2 uses a single-byte length prefix for `issuer_id`. The helper is provided for internal consistency and for use by future protocol versions.
 
 ---
 
@@ -1463,7 +1481,7 @@ rp_challenge_bytes = H_sha256(
 rp_hash = H_b2s(rp_challenge_bytes)           // 32 bytes, no personalisation
 ```
 
-This is the normative v1.0 construction. The `CHALLENGE_DST` appears last in the preimage; `origin` appears first without a length prefix. Origin validation is what prevents ambiguous parses of the preimage: the 19 byte `CHALLENGE_DST` bytes `7a65726f6b702e6368616c6c656e67652e7631` cannot occur anywhere inside a validated origin (printable ASCII excludes `0x2e`-free tails that would form the trailing `.v1`, and the nonce's 32 bytes intervene between origin and DST anyway).
+This is the normative v1.0 construction. The `CHALLENGE_DST` appears last in the preimage; `origin` appears first without a length prefix. A validated origin cannot terminate with the 19-byte `CHALLENGE_DST` suffix because the 32-byte `nonce` is interposed between origin and DST in the preimage; an attacker cannot reconstruct the 19-byte DST by shifting the parse boundary without also shifting the nonce bytes, which have overwhelming probability of containing values not found in the DST. Appendix F.5 shows the proposed length-prefixed hardening that removes this dependency.
 
 A length-prefixed variant (`u32_le(len(origin)) || origin || nonce || DST`) is under consideration as a v1.1 hardening to remove the dependence on origin validation for domain separation; see Appendix F. v1.0 implementations MUST use the non-prefixed form above.
 
@@ -1596,7 +1614,7 @@ vk_id          = u32_le(H_b2s(VK_ID_DST || vk_bytes)[0..4])
                                                   // VK_ID_DST = "zerokp.vk.id.v1"
 ```
 
-The `vk_bytes` are the canonical Bellman serialised verifying key (`bellman::groth16::VerifyingKey<Bls12>::write`).
+The `vk_bytes` are the canonical Bellman serialised verifying key [Bellman] (`bellman::groth16::VerifyingKey<Bls12>::write`).
 
 The Verifier maintains a registry mapping `vk_id` to `PreparedVerifyingKey`:
 ```
@@ -1671,7 +1689,7 @@ Prove(params, direction, cutoff_days, rp_hash, witness):
     return (proof, public_inputs)
 ```
 
-Implementations MUST zeroise the witness fields after the prove call returns.
+Implementations MUST zeroise all secret witness fields (those marked `secret` in Section 12.4) after the prove call returns.
 
 ### 13.10 Proof Verification
 
@@ -1685,7 +1703,7 @@ Verify(vk, proof_bytes, direction, cutoff_days, rp_hash,
     return bellman::groth16::verify_proof(vk, proof, public_inputs)
 ```
 
-Implementations MUST use the canonical Bellman serialisation for proof bytes (Section 15.5). Implementations that parse arkworks serialisation (or any other format) MUST detect the format mismatch and reject; the byte layouts differ.
+Implementations MUST use the canonical Bellman serialisation [Bellman] for proof bytes (Section 15.5). Implementations that parse arkworks serialisation (or any other format) MUST detect the format mismatch and reject; the byte layouts differ.
 
 A conforming Verifier MUST validate `len(proof_bytes) == 192` before parsing. The Verifier MAY accept a wider validation range (the reference implementation accepts 100 to 500 bytes upstream as a defensive bound), but the canonical Groth16 over BLS12-381 proof is exactly 192 bytes.
 
@@ -1842,11 +1860,8 @@ Step 9.  The Verifier processes the submission:
    9d. Compute rp_hash = H_b2s(rp_challenge). This is the value
        the proof's public inputs should encode at indices 2-3.
 
-   9e. Check the nullifier against the ban store:
-           if nullifier in nullifier_ban_store with timestamp >= now - NULLIFIER_BAN_TTL_SECONDS:
-               return Error::CredentialBanned
-           else:
-               nullifier_ban_store.insert(nullifier, now)
+   9e. Check the nullifier against the Verifier's ban store. If
+       banned, return Error::CredentialBanned.
 
    9f. Look up the issuer in the issuer registry by issuer_vk_bytes.
        If not present or status != Active, return Error::UnknownIssuer.
@@ -1854,16 +1869,9 @@ Step 9.  The Verifier processes the submission:
    9g. Look up the verifying key in VK_REGISTRY by vk_id.
        If not present, return Error::UnknownVerifyingKey.
 
-   9h. Verifier credential expiry check is NOT performed in v1.0.
-       The Verifier does not receive the credential's iat or exp; they
-       are private inputs to the circuit and never cross the wire.
-       A conforming Verifier CANNOT enforce credential expiry in v1.0.
-       The Wallet is responsible for refusing to generate proofs from
-       expired credentials (Section 13.5, Section 17.11). A Verifier
-       that requires server-side expiry enforcement MUST require its
-       Issuers to issue short-lived credentials (recommended <= 30
-       days, see Section 17.12) so the trust window at the wallet is
-       bounded.
+   9h. See Section 12.9 and Section 17.11. A conforming Verifier does
+       not receive `iat`/`exp` and cannot enforce credential expiry in
+       v1.0.
 
    9i. Assemble the public inputs vector (Section 13.6) using
        direction from the stored challenge record, cutoff_days from
@@ -1923,14 +1931,21 @@ An alternative computation is `cutoff_days = floor(now_days - n * 365.25)`. This
 
 Two independent concerns:
 
-**Replay protection.** Prevents a captured proof from being submitted a second time. Achieved by four independently-sufficient defence layers; a defender requires only that any one layer hold, and an attacker must defeat every layer simultaneously to replay a proof.
+**Replay protection.** Prevents a captured proof from being submitted a second time, or its verification outcome from being redeemed by a party other than the one that initiated the challenge. Replay is blocked at two distinct points in the flow.
 
-| Replay defence layer | Mechanism |
+Layers that block submission. Three independently-sufficient defences operate at proof submission (Section 14.5). A captured proof cannot be resubmitted if any one of these holds.
+
+| Submission-blocking layer | Mechanism |
 |---|---|
 | Single-use challenge | Challenge state moves Pending → Consumed on first valid submission. Subsequent submissions against the same `challenge_id` MUST be rejected. |
 | Submit secret | The 32 byte `submit_secret` is shared only RP→Wallet; third parties observing the public challenge cannot reconstruct it and cannot submit. |
 | RP binding | The `rp_hash` public input binds the proof to a specific origin and challenge nonce; a proof generated for one challenge cannot satisfy a different challenge's public inputs. |
-| PKCE | The `code_verifier` binds result redemption to the party that initiated the challenge; a third party cannot claim the result even if it observes the submission. |
+
+Layer that blocks redemption. PKCE operates at result redemption (Section 14.7), not at submission. A third party that somehow succeeds in submitting a captured proof still cannot claim the verification outcome.
+
+| Redemption-blocking layer | Mechanism |
+|---|---|
+| PKCE | The `code_verifier` is known only to the party that supplied the original `code_challenge`. Redemption requires presenting the verifier; a third party cannot claim the result even if it observes the submission. |
 
 Supporting properties. These bound the replay window or reinforce a defence layer but do not themselves block replay.
 
@@ -1940,11 +1955,7 @@ Supporting properties. These bound the replay window or reinforce a defence laye
 | Time bounds | Challenges expire after `CHALLENGE_EXPIRY_SECONDS` (300), bounding the replay window. |
 | Clock skew tolerance | `CLOCK_SKEW_TOLERANCE_SECONDS` (30) prevents clock drift abuse without widening the window materially. |
 
-**Ban enforcement.** A separate mechanism. The Verifier maintains a nullifier ban store; any submitted proof whose nullifier appears in the store is rejected. This lets the Verifier block specific credentials that are known to be abusive or compromised, independently of whether any given proof is a replay.
-
-| Ban enforcement | Mechanism |
-|---|---|
-| Nullifier ban store | The Pedersen nullifier is a public input. Verifiers check the nullifier against the ban store and reject on hit. Entries persist for `NULLIFIER_BAN_TTL_SECONDS` (600) by default; persistent bans for compromised credentials are deployment-configurable and MAY extend indefinitely. |
+**Ban enforcement.** A separate mechanism. The Verifier maintains a nullifier ban store as a persistent list of nullifiers belonging to credentials known to be abusive or compromised. The store is managed by a Verifier-side administrative process (typically an operator console writing to durable storage such as Cloudflare KV); entries are added and removed by operator action, not automatically by verification events. Entries persist until an operator removes them; there is no TTL. Any submitted proof whose nullifier matches a banned entry is rejected with `Error::CredentialBanned`. This lets the Verifier block specific credentials independently of whether any given proof is a replay.
 
 ---
 
@@ -2069,7 +2080,7 @@ JSON numeric precision note. The `timestamp` field is declared u64 (Section 10.2
 
 ### 15.5 Groth16 Proof
 
-The Groth16 proof is exactly 192 bytes regardless of statement complexity. The byte layout follows the canonical Bellman serialisation:
+The Groth16 proof is exactly 192 bytes regardless of statement complexity. The byte layout follows the canonical Bellman serialisation [Bellman]:
 
 ```
 Offset  Length  Field           Encoding
@@ -2455,13 +2466,13 @@ Implementations MUST embed `vk_id` in every proof submission so the Verifier can
 
 The protocol is forward compatible with the introduction of new `vk_id` values. Verifiers MAY support multiple `vk_id` values simultaneously; old `vk_id` values SHOULD be retired only after all credentials issued against them have expired.
 
-Per the project policy "no migration code", old `vk_id` values are retired by removal from the registry rather than maintained for backward compatibility. Wallets that have not refreshed their proving key MUST detect the retirement (their proofs will be rejected with `UnknownVerifyingKey`) and MUST refresh.
+Per the project policy "no migration code", old `vk_id` values are retired by removal from the registry rather than maintained for backward compatibility. Wallets that have not refreshed their proving key MUST detect the retirement (their proofs are rejected with `UnknownVerifyingKey`) and MUST refresh.
 
 ### 17.11 Expiry Trust Assumption
 
 v1.0 relies on wallet-side enforcement of credential expiry. The Verifier does not receive `iat` or `exp`; they are inside the witness and never cross the wire. A malicious Wallet that skips preflight (Section 13.5) can present an expired credential and obtain a successful verification. The protocol does not defend against this failure mode at the Verifier.
 
-Relying Parties and Verifier operators who require stronger guarantees MUST require their Issuers to issue short-lived credentials. With a credential lifetime of 30 days or less, the window of misuse by a malicious Wallet is bounded.
+Relying Parties and Verifier operators MUST require their Issuers to issue short-lived credentials whenever stronger guarantees of expiry enforcement are required. With a credential lifetime of 30 days or less, the window of misuse by a malicious Wallet is bounded.
 
 A future protocol revision may add `iat` or `exp` to the public input set, pushing the check into the circuit at the cost of two additional multipacked field elements and the associated trusted setup change. v1.0 consciously trades server-side expiry enforcement for smaller submission payload and simpler verifier state.
 
@@ -2483,7 +2494,7 @@ The protocol does not mandate rate limits but operators MUST consider the follow
 Step 1. challenge_id lookup              // O(1) map lookup
 Step 2. submit_secret constant-time cmp  // O(1) 32-byte compare
 Step 3. rp_challenge constant-time cmp   // O(1) 32-byte compare
-Step 4. nullifier ban lookup          // O(1) map lookup
+Step 4. nullifier ban-store lookup       // O(1) map lookup
 Step 5. issuer registry lookup           // O(1) map lookup
 Step 6. vk_id registry lookup            // O(1) map lookup
 Step 7. Groth16 verify_proof             // expensive
@@ -2524,7 +2535,7 @@ Issuance Servers MUST reject `dob_days` values outside the operationally plausib
 
 ### 17.19 `vk_id` Collision Bound
 
-`vk_id` is a 32-bit identifier (Section 13.7). The birthday bound predicts a collision at approximately 2^16 distinct keys. Deployments that rotate verifying keys infrequently are unaffected. A future protocol revision may widen `vk_id` to `u64` when deployment density warrants it.
+`vk_id` is a 32-bit identifier (Section 13.7). The birthday bound predicts a collision at approximately 2^16 distinct keys. Deployments that rotate verifying keys infrequently are unaffected. Deployments that cycle fewer than 256 verifying keys concurrently or retain history below 4096 keys are well below the birthday bound. A future protocol revision may widen `vk_id` to `u64` when deployment density warrants it.
 
 ---
 
@@ -2538,7 +2549,7 @@ The following table summarises information learned by each party under correct o
 |---|---|---|
 | Wallet | Nothing about the Verifier or RP beyond what the user observed. Sends Groth16 proof (zero knowledge) and public inputs (age threshold but not age, RP binding, issuer binding, nullifier). | Does NOT send date of birth, name, document number, identity, or Wallet identifier. |
 | Issuance Server | During issuance: date of birth, commitment randomness. Stores audit metadata only (Section 11.3) and credential metadata for revocation purposes if applicable. | Does NOT store date of birth, randomness, or the resulting commitment. |
-| Verifier | That a verification occurred, the binary result, the credential nullifier, the issuer verifying key, the RP origin, the cutoff days and direction the RP requested. Stores keyed-HMAC pseudonyms of IP addresses (see Section 18.5; plain SHA-256 of IPs is forbidden), challenge records (5 minute TTL), nullifier ban store (10 minutes from challenge creation time per `NULLIFIER_BAN_TTL_SECONDS`; 90 day audit log retention for verification events). | Does NOT learn the user's date of birth, the credential's actual `iat`/`exp` (those are inside the proof witness), the user's name, or the user's wallet identity. |
+| Verifier | That a verification occurred, the binary result, the credential nullifier, the issuer verifying key, the RP origin, the cutoff days and direction the RP requested. Stores keyed-HMAC pseudonyms of IP addresses (see Section 18.5; plain SHA-256 of IPs is forbidden), challenge records (5 minute TTL), a nullifier ban store (permanent entries, managed by operator action; see Section 14.9), and verification-event audit log entries (90 day retention). | Does NOT learn the user's date of birth, the credential's actual `iat`/`exp` (those are inside the proof witness), the user's name, or the user's wallet identity. |
 | Relying Party | The binary verification result, the cutoff days and direction it itself requested. | Does NOT learn the proof, the public inputs, the user's age, the user's date of birth, the user's wallet identity, or the nullifier. |
 
 Total PII in the verification flow is limited to keyed-HMAC pseudonyms of IP addresses (in Verifier logs, with limited retention; see Section 18.5). Total age related data in the verification flow is zero. The age threshold is set by the RP and is public; the user's actual age is never revealed.
@@ -2558,7 +2569,7 @@ The mechanisms supporting unlinkability are:
 
 Multiple proofs generated by the same Wallet from the same Credential, submitted to the same Verifier, present the same nullifier. The Verifier MAY use this to recognise repeat verifications from the same credential. This is intentional and supports credential ban enforcement; it does not link the verifications to the user identity.
 
-If a Wallet wishes to be unlinkable across verifications at the same Verifier within the `NULLIFIER_BAN_TTL_SECONDS` window, it would need a different credential with a different commitment. Parley does not currently support multiple credentials per user with unlinkable nullifiers; this is a possible v2.0 feature.
+If a Wallet wishes to be unlinkable across verifications at the same Verifier, it would need a different credential with a different commitment. Parley does not currently support multiple credentials per user with unlinkable nullifiers; this is a possible v2.0 feature.
 
 ### 18.4 Cross-Verifier Linkability of Nullifiers
 
@@ -2594,7 +2605,14 @@ Audit logs at the Verifier MUST NOT contain wallet identifying information beyon
 
 ### 18.8 Audit Log Retention
 
-The recommended audit log retention period for both Issuance Servers and Verifiers is 90 days. The 90 day ceiling balances four independent constraints: the typical regulatory minimum for security-event retention (for example, Australian regulatory guidance for operational logs and analogous European requirements), the maximum credential lifetime recommended for v1.0 (Section 17.12, 365 day ceiling with 30 day recommended), the bound on residual privacy exposure from long-lived records that might later be correlated with external datasets, and the operational cost of storing and indexing audit volumes over extended windows.
+The recommended audit log retention period for both Issuance Servers and Verifiers is 90 days. The 90 day ceiling balances four independent constraints:
+
+| Constraint | Effect on the 90 day ceiling |
+|---|---|
+| Regulatory minimums | Typical regulatory guidance for security-event retention (for example, Australian guidance for operational logs and analogous European requirements) sets a floor that 90 days comfortably exceeds. |
+| Maximum credential lifetime | Section 17.12 caps credentials at 365 days with 30 days recommended; 90 days spans the typical credential validity window with room for retrospective audit. |
+| Residual privacy exposure | Long-lived records risk later correlation with external datasets; shorter retention reduces that exposure. |
+| Operational cost | Storing and indexing audit volumes over extended windows is expensive; 90 days is a practical ceiling for typical deployment budgets. |
 
 Normative requirements:
 
@@ -2608,7 +2626,7 @@ Normative requirements:
 
 ## 19. IANA Considerations
 
-This document has no IANA actions. Should a future revision of this specification require registration of media types, URN schemes, OID arcs, or other IANA-managed values, those registrations will be specified in the revision.
+This document has no IANA actions. Should a future revision of this specification require registration of media types, URN schemes, OID arcs, or other IANA-managed values, those registrations are specified in the revision.
 
 ---
 
@@ -2626,13 +2644,13 @@ This document has no IANA actions. Should a future revision of this specificatio
 
 [RFC8032] Josefsson, S. and I. Liusvaara, "Edwards-Curve Digital Signature Algorithm (EdDSA)", RFC 8032, January 2017, `https://www.rfc-editor.org/info/rfc8032`.
 
-[RFC3986] Berners-Lee, T., Fielding, R., and L. Masinter, "Uniform Resource Identifier (URI): Generic Syntax", STD 66, RFC 3986, January 2005, `https://www.rfc-editor.org/info/rfc3986`. Defines the unreserved character set referenced by PKCE (Section 13.5) and the URI syntax used for origin strings (Section 13.2).
+[RFC3986] Berners-Lee, T., Fielding, R., and L. Masinter, "Uniform Resource Identifier (URI): Generic Syntax", STD 66, RFC 3986, January 2005, `https://www.rfc-editor.org/info/rfc3986`. Defines the unreserved character set referenced by PKCE (Section 13.4 and Section 15.8) and the URI syntax used for origin strings (Section 13.2).
 
 [RFC9562] Davis, K., Peabody, B., and P. Leach, "Universally Unique IDentifiers (UUIDs)", RFC 9562, May 2024, `https://www.rfc-editor.org/info/rfc9562`. Defines UUID version 4 and the 36 character canonical hyphenated representation used for `challenge_id` in Section 14.2.
 
-[PairingCurves] Sakemi, Y., Kobayashi, T., Saito, T., and R. Wahby, "Pairing-Friendly Curves", Work in Progress, Internet-Draft, draft-irtf-cfrg-pairing-friendly-curves, `https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/`. Authoritative BLS12-381 parameters, compressed point encoding, and subgroup membership conventions.
+[PairingCurves] Sakemi, Y., Kobayashi, T., Saito, T., and R. Wahby, "Pairing-Friendly Curves", Work in Progress, Internet-Draft, draft-irtf-cfrg-pairing-friendly-curves-11, `https://datatracker.ietf.org/doc/draft-irtf-cfrg-pairing-friendly-curves/11/`. Authoritative BLS12-381 parameters, compressed point encoding, and subgroup membership conventions. Pinned at draft -11; this reference is updated when the draft is published as an RFC.
 
-[ZcashSapling] Hopwood, D., Bowe, S., Hornby, T., and N. Wilcox, "Zcash Protocol Specification, Version 2024.5.4 [NU6]", The Electric Coin Company, 2024, `https://zips.z.cash/protocol/protocol.pdf`. Specifically Section 5.4.1.7 (Pedersen hashes over the Jubjub curve), Section 4.2.2 together with the generator definitions in Section 5.4.8.3 (Sapling spending key base point), and Section 5.4.7 (RedJubjub: a variant of RedDSA over Jubjub). Section 4.1.6.5 of the pre-Sapling specification is historically sometimes cited for the generator; the Sapling revision moves the definition to the sections above. The Parley RedJubjub variant in Section 8 differs from the Sapling RedJubjub in challenge hash, message format, and message binding; Appendix E enumerates the differences.
+[ZcashSapling] Hopwood, D., Bowe, S., Hornby, T., and N. Wilcox, "Zcash Protocol Specification, Version 2024.5.4 [NU6]", The Electric Coin Company, 2024, `https://zips.z.cash/protocol/protocol.pdf`. Specifically Section 5.4.1.7 (Pedersen hashes over the Jubjub curve), Section 4.2.2 together with Section 5.4.8.3 (Sapling spending key base point), and Section 5.4.7 (RedJubjub).
 
 [Groth16] Groth, J., "On the Size of Pairing-Based Non-interactive Arguments", EUROCRYPT 2016, LNCS 9666, pp. 305-326, May 2016, `https://eprint.iacr.org/2016/260`.
 
@@ -2921,7 +2939,7 @@ Verification result: valid (under the matching VK from
 test_native_verify; not the production VK).
 ```
 
-### A.13 Notes on Test Vector Maturity
+### A.13 Notes on Test Vector Maturity (Informative)
 
 The hex outputs in A.5 through A.12 were materialised from the reference implementation's deterministic test harness at `parley-crypto/crypto-e2e-tests/tests/spec_vectors.rs`, which is the canonical source for the values pinned in this appendix. The harness is driven by `ChaCha20Rng::from_seed([0u8; 32])` and re-runs bit-for-bit on every invocation; any drift between this appendix and the harness output is a defect in the implementation or in this document.
 
@@ -3184,7 +3202,7 @@ The migration trajectory is informative; v1.0 is a classical-only specification.
 
 ## Appendix E: Deviations from Zcash
 
-This appendix is informative.
+This appendix is informative; normative behaviour is fixed by Sections 4, 7, 8, 9, and 12.
 
 Parley shares cryptographic primitives with Zcash Sapling (curves, generator point, Pedersen hash, Groth16, BLS12-381). It is not Zcash compatible at the protocol level. Zcash transactions, proofs, signatures, and commitments cannot be substituted for Parley equivalents.
 
@@ -3251,7 +3269,7 @@ The identifiers `PROOF_V2_DST`, `COMMITMENT_HASH_DOMAIN`, `CREDENTIAL_DOMAIN`, a
 
 ### F.5 Length-Prefixed `rp_challenge` Preimage
 
-The v1.0 `rp_challenge` construction (Section 13.2) hashes `origin || nonce || CHALLENGE_DST` without a length prefix on `origin`. Domain separation in v1.0 rests on origin validation (printable ASCII, `1..=1024` bytes), which is sufficient because the validated origin cannot contain or be suffixed by the 32 byte nonce plus the 19 byte `CHALLENGE_DST`.
+The v1.0 `rp_challenge` construction (Section 13.2) hashes `origin || nonce || CHALLENGE_DST` without a length prefix on `origin`. Domain separation in v1.0 rests on origin validation (printable ASCII, `1..=2048` bytes), which is sufficient because the validated origin cannot contain or be suffixed by the 32 byte nonce plus the 19 byte `CHALLENGE_DST`.
 
 A proposed v1.1 hardening prepends a 4 byte little-endian length:
 
@@ -3300,6 +3318,13 @@ The Maelstrom AI engineering team conducted the protocol design, implementation,
 ---
 
 ## Authors' Addresses
+
+Tim O'Connor (editor)
+Maelstrom AI Pty Ltd ATF Maelstrom AI Holding Trust
+PO Box 169
+St Arnaud VIC 3478
+Australia
+Email: tim@parleywallet.app
 
 Maelstrom AI Pty Ltd
 ATF Maelstrom AI Holding Trust
