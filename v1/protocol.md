@@ -1467,7 +1467,7 @@ A length-prefixed variant (`u32_le(len(origin)) || origin || nonce || DST`) is u
 
 - It is a valid WHATWG origin (scheme, host, and optional port; no path, query, or fragment).
 - Each byte is a printable ASCII character in the range `0x21..=0x7E`. Implementations MUST reject null bytes, any byte below `0x20`, and any byte `>= 0x7F`.
-- `len(origin)` is at least 1 and at most 1024 bytes.
+- `len(origin)` is at least 1 and at most 2048 bytes.
 
 Implementations MUST reject origins that fail any of these checks before calling `H_sha256`.
 
@@ -2130,7 +2130,7 @@ Offset  Length         Field
 +...    19             CHALLENGE_DST           ("zerokp.challenge.v1")
 ```
 
-Implementations MUST validate `origin` per Section 13.2 (WHATWG origin, printable ASCII, 1..=1024 bytes) before hashing. Origin validation is the mechanism that prevents ambiguous parses of the preimage in v1.0; a length-prefixed variant is under consideration for v1.1 (Appendix F).
+Implementations MUST validate `origin` per Section 13.2 (WHATWG origin, printable ASCII, 1..=2048 bytes) before hashing. Origin validation is the mechanism that prevents ambiguous parses of the preimage in v1.0; a length-prefixed variant is under consideration for v1.1 (Appendix F).
 
 Output is 32 bytes. The same 32 bytes are then Blake2s-256 wrapped (Section 13.2) to produce `rp_hash`.
 
