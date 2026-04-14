@@ -95,9 +95,9 @@ If You institute patent litigation against Maelstrom AI Pty Ltd or any other imp
 
 Age restriction is a common requirement in online services: alcohol, gambling, adult content, financial products, and increasingly, mainstream social platforms. The default approach is to ask the user for a copy of a government issued identity document, or to delegate the check to a third party that does so. Both approaches transfer a complete identity record, including name, photograph, address, and document number, in order to answer a single question whose true answer is one bit: is the user old enough.
 
-The asymmetry is severe. The Relying Party only needs the bit. The user pays in identity exposure, ongoing breach risk, and the loss of a clean separation between unrelated services. The verifier, who must store some record to satisfy regulators, accumulates a high value target.
+The asymmetry is severe. The Relying Party only needs the bit. The user pays in identity exposure, ongoing breach risk, and the loss of a clean separation between unrelated services. The Verifier, who must store some record to satisfy regulators, accumulates a high value target.
 
-Parley is a protocol that returns to the Relying Party only the answer to the age question. The user's wallet holds a credential issued once by an authorised identity provider. For each verification request, the wallet generates a zero knowledge proof that the credential commits to a date of birth satisfying the age predicate. The Relying Party learns the bit and a unique nullifier sufficient for double spend prevention. It learns no date of birth, no document number, no identity. The verifier sees only the proof and the public inputs to the circuit; it cannot recover any identifier from them.
+Parley is a protocol that returns to the Relying Party only the answer to the age question. The user's wallet holds a credential issued once by an authorised identity provider. For each verification request, the wallet generates a zero knowledge proof that the credential commits to a date of birth satisfying the age predicate. The Relying Party learns only the binary verification result and the age threshold it requested. It learns no date of birth, no document number, no identity, no nullifier, and no proof internals. The Verifier sees the proof and its public inputs (one of which is a per-credential nullifier used for credential ban enforcement) but cannot recover any identifying attribute from them.
 
 ### 1.2 Approach
 
@@ -175,7 +175,7 @@ The following terms are used throughout this document with the precise meanings 
 
 **Issuer.** An identity provider authorised to attest to dates of birth. Holds an Ed25519 attestation key (used by the IdP in some embodiments, by the Issuance Server in others) and a RedJubjub credential signing key. The Issuer's RedJubjub verifying key is published to a key registry consulted by Verifiers.
 
-**Nullifier.** A deterministic 32 byte value derived from a Credential's commitment via a second Pedersen hash with a distinct personalisation tag. The Nullifier is a public input to every proof generated from the Credential. Verifiers MAY use it to detect duplicate proofs from the same Credential.
+**Nullifier.** A deterministic 32 byte value derived from a Credential's commitment via a second Pedersen hash with a distinct personalisation tag. The Nullifier is a public input to every proof generated from the Credential. The Verifier uses it to maintain a ban list of abusive or compromised Credentials (Section 9.4, Section 14.9). The Nullifier is visible to the Verifier only; it is not returned to the Relying Party.
 
 **PKCE.** Proof Key for Code Exchange, [RFC7636]. Used in Parley to bind the party that receives the verification result to the party that initiated the challenge. Parley uses the S256 method exclusively.
 
@@ -197,7 +197,7 @@ The following terms are used throughout this document with the precise meanings 
 
 **Submit Secret.** A 32 byte CSPRNG sourced token issued by the Verifier alongside a challenge. The Verifier returns it only to the RP. The Wallet receives it through the RP and includes it in the proof submission. Constant time comparison against the stored value gates the submission.
 
-**Verifier.** The server that verifies Groth16 proofs against an issuer key registry, enforces challenge expiry and nullifier deduplication, and notifies the Relying Party of the verification result via PKCE redemption. The Verifier role MAY be co-located with the Relying Party or operated as a separate service; Section 3.5 discusses the trust implications of each topology.
+**Verifier.** The server that verifies Groth16 proofs against an issuer key registry, enforces challenge expiry, maintains the nullifier ban list, and notifies the Relying Party of the verification result via PKCE redemption. The Verifier role MAY be co-located with the Relying Party or operated as a separate service; Section 3.5 discusses the trust implications of each topology.
 
 **Verifying Key (VK).** Two distinct keys are referred to by similar names in this document; context disambiguates.
 
@@ -403,7 +403,7 @@ The Wallet trusts the Issuer's RedJubjub credential signing key to attest only t
 
 The Verifier trusts the Issuer's RedJubjub verifying key, as registered in the Verifier's allowlist, to identify legitimate credentials. The Verifier trusts the integrity of the Groth16 trusted setup that produced the proving and verifying keys for the age circuit. The Verifier trusts its own session storage for challenge state and nullifier ban state.
 
-The Relying Party trusts the Verifier to enforce protocol invariants: challenge expiry, nullifier deduplication, in circuit proof verification, off circuit credential expiry rejection, PKCE single use, and constant time checks on secret comparisons.
+The Relying Party trusts the Verifier to enforce protocol invariants: challenge expiry, nullifier ban enforcement, in circuit proof verification, off circuit credential expiry rejection, PKCE single use, and constant time checks on secret comparisons.
 
 The Issuance Server trusts the IdP to authenticate the user (in the preferred embodiment). The Issuance Server trusts its own randomness sources, its own RedJubjub key, and its own audit log integrity.
 
@@ -552,7 +552,7 @@ The active DSTs in Section 5.1 are byte distinct and no two share a prefix. Impl
 
 The `SESSION_TIMEOUT_SECONDS` value is given here in seconds. The reference implementation declares the equivalent constant as `SESSION_TIMEOUT_MS = 120_000` (milliseconds). Implementations MUST treat the canonical value as 120 seconds and convert to other units as needed for their environment.
 
-The `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS = 60` value differs from the generic `CLOCK_SKEW_TOLERANCE_SECONDS = 30` because Ed25519 attestation timestamps cross trust boundaries (the IdP's clock vs the Issuance Server's clock) and the protocol allows additional slack on the upper bound. Both values are normative. The reference implementation inlines the attestation skew bound as a function-local constant `CLOCK_SKEW_TOLERANCE: u64 = 60` inside `verify_with_timestamp` (`parley-crypto/crypto-commons/src/attestation.rs:309`); a future revision should promote it to an exported module constant, but the numeric value is normative regardless.
+The `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS = 60` value differs from the generic `CLOCK_SKEW_TOLERANCE_SECONDS = 30` because Ed25519 attestation timestamps cross trust boundaries (the IdP's clock vs the Issuance Server's clock) and the protocol allows additional slack on the upper bound. Both values are normative and are exported from `parley-crypto/crypto-commons/src/constants.rs`.
 
 **Invariants.** Implementations MUST satisfy:
 - `CHALLENGE_EXPIRY_SECONDS > CLOCK_SKEW_TOLERANCE_SECONDS`
@@ -924,7 +924,7 @@ PedersenNullifier(c_bytes):
 
 **Determinism.** For a given commitment, the nullifier is deterministic. Two proofs generated from the same credential present the same nullifier. Verifiers use this property to maintain a ban store of nullifiers belonging to abusive or compromised credentials; any proof whose nullifier is in the ban store is rejected. Replay protection is handled separately by single-use challenge consumption, the `submit_secret`, and PKCE.
 
-**Cross verifier linkability.** The nullifier is deterministic per credential, meaning if two Verifiers were to compare nullifier logs they could determine that the same credential had been used at both. In practice Verifiers operate independently and do not share nullifier databases. This privacy limitation is documented in Section 18.4.
+**Cross verifier linkability (theoretical).** v1.0 deployments run a single Verifier service, so cross-Verifier linkage is not a live concern. If a multi-Verifier topology is introduced in a future revision, the deterministic nullifier would let two cooperating Verifiers confirm that the same credential had been used at both. This theoretical limitation is documented in Section 18.4.
 
 **Domain separation construction.** The DST is included as a *bit level input* to the Pedersen hash, not as the personalisation parameter. The personalisation is `MerkleTree(0)` (the six bit prefix `000000`, see Section 5.2), while the DST `parley.nullifier.pedersen.v1` flows in as the leading 224 bits of the input. This is a deliberate construction: the personalisation slot is reserved to distinguish nullifier from commitment Pedersen hashes; the DST adds protocol level separation from any other use of `MerkleTree(0)`.
 
@@ -2341,9 +2341,11 @@ Defence: the protocol does not defend against this threat directly. An Issuer is
 
 Defence: TLS 1.3 protects the wire. The cryptographic protocol additionally binds proofs to specific (origin, nonce) pairs via the RP hash (Section 13.2), so even an attacker who can read the proof cannot replay it to a different origin.
 
-**Cross-Verifier Linkability Attacker.** Two Verifiers who collude by comparing nullifier logs to determine that the same credential was used at both.
+**Cross-Verifier Linkability Attacker (theoretical).** Two Verifiers who compare nullifier logs to determine that the same credential was used at both.
 
-Defence: the protocol does not defend against this. The nullifier is deterministic per credential. This is a documented privacy limitation (Section 18.4).
+Applicability: v1.0 deployments run a single Verifier service, so this attacker has no counterparty today. The scenario becomes meaningful only if a future protocol revision introduces multiple independent Verifiers that share a nullifier namespace. The defence considerations below apply to that future topology.
+
+Defence: the protocol does not defend against this. The nullifier is deterministic per credential. Section 18.4 discusses the theoretical limitation and the v2.0 direction (per-Verifier nullifier randomisation) that would eliminate it.
 
 ### 17.2 Cryptographic Assumptions
 
@@ -2571,13 +2573,13 @@ Multiple proofs generated by the same Wallet from the same Credential, submitted
 
 If a Wallet wishes to be unlinkable across verifications at the same Verifier, it would need a different credential with a different commitment. Parley does not currently support multiple credentials per user with unlinkable nullifiers; this is a possible v2.0 feature.
 
-### 18.4 Cross-Verifier Linkability of Nullifiers
+### 18.4 Cross-Verifier Linkability of Nullifiers (Theoretical)
 
-Because the nullifier is a deterministic function of the commitment, two Verifiers who collude by exchanging nullifier logs can determine that the same Credential was used at both. The protocol does not defend against this.
+v1.0 deployments run a single Verifier service, so cross-Verifier linkability is not a present concern. The text below describes the theoretical property and records it against future multi-Verifier topologies.
 
-In practice, Verifiers operate independently and do not exchange nullifier databases. There is no operational mechanism in the protocol for nullifier exchange. An adversary attempting to exploit this would need to compromise both Verifiers or socially engineer their cooperation.
+Because the nullifier is a deterministic function of the commitment, two Verifiers that share a nullifier namespace could determine that the same Credential was used at both by comparing logs. The protocol does not cryptographically prevent this.
 
-This privacy limitation is documented for transparency. A future protocol version may introduce per-Verifier nullifier randomisation to eliminate this property, at the cost of additional circuit constraints.
+A future protocol version MAY introduce per-Verifier nullifier randomisation to eliminate the property, at the cost of additional circuit constraints.
 
 ### 18.5 Side Channel Privacy
 
@@ -2990,7 +2992,7 @@ A malicious wallet attempts to reuse Alice's proof from B.2 to access another si
 
 1. The malicious wallet captures the network traffic during B.2 step 7 (the proof submission). It now holds `{ challenge_id, submit_secret, proof, vk_id, cutoff_days, rp_challenge, issuer_vk, nullifier }`.
 2. The malicious wallet attempts to submit this exact payload to the same Verifier. The Verifier finds the challenge record state is already Consumed and returns `Error::ReplayDetected`.
-3. The malicious wallet attempts to submit to a different Verifier (different deployment). The submission fails because the second Verifier has no challenge record matching this `challenge_id`; it returns `Error::ReplayDetected` (or `Error::UnknownChallenge`).
+3. The malicious wallet attempts to submit to a different Verifier (different deployment). The submission fails because the second Verifier has no challenge record matching this `challenge_id`; it returns `Error::ReplayDetected` (the same error emitted for a consumed challenge; the two cases are deliberately merged to avoid an oracle on challenge provenance).
 4. The malicious wallet attempts to substitute a different `rp_challenge` (one issued by the second Verifier). The proof verification fails because the proof's `rp_hash` public input does not match the substituted value.
 5. The malicious wallet attempts to substitute a different `submit_secret`. The Verifier rejects in constant time at step 9b.
 
@@ -3052,9 +3054,7 @@ struct AgeSnarkProofV2 {
 }
 ```
 
-The `vk` field is `u32`. An earlier reference implementation used `u16` for this field; that width is insufficient for the production `vk_id = 2031517468` (which exceeds `u16::MAX = 65535`). Implementations MUST use `u32`.
-
-Implementation status: `parley-crypto/crypto-prover/src/lib.rs:303` and `parley-crypto/crypto-verifier/src/lib.rs:68` use `u32` for the `vk` / `vk_id` field. As of this revision, `parley-crypto/crypto-commons/src/lib.rs:118` still declares `pub vk: u16` on `AgeSnarkProofV2`. This is a known defect in the reference implementation: the production `vk_id = 2031517468` overflows `u16::MAX`, so the `crypto-commons` struct cannot represent a valid production proof. Implementations consuming `crypto-commons` types directly MUST treat this as a soundness defect and either widen the field locally or reject `crypto-commons::AgeSnarkProofV2` entirely until the upstream is fixed. The normative wire field is `u32`.
+The `vk` field is `u32`. Implementations MUST use `u32`; `u16` is insufficient for the production `vk_id = 2031517468` (which exceeds `u16::MAX = 65535`). Both `parley-crypto/crypto-prover/src/lib.rs:303` (`AgeSnarkProofV2Extended.vk`) and `parley-crypto/crypto-commons/src/lib.rs:118` (`AgeSnarkProofV2.vk`) declare this field as `u32`.
 
 ### C.4 AgeSnarkProofV2Extended
 
