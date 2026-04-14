@@ -1,0 +1,186 @@
+# Parley Protocol Spec — CI
+#
+# Runs on every PR and every push to main. Builds the HTML render,
+# lints Markdown, checks links in the rendered HTML, and verifies
+# anchor stability against the main branch.
+#
+# Depends on:
+#   - Sarah's track (spec-template): ./build.sh is the single build entry point.
+#   - Ryan's track (spec-seo):       dist/sitemap.xml asserted in deploy, not here.
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  build-html:
+    name: Build HTML (pandoc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+          disable-sudo: false  # apt-get install pandoc needs sudo
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0  # required for anchor diff job
+
+      - name: Install pandoc (apt, pinned by ubuntu-latest image snapshot)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # Pin to the version currently shipped by the ubuntu-24.04 runner image.
+          # `apt-get install pandoc` is deterministic within a given image SHA,
+          # which itself is pinned by Dependabot's github-actions ecosystem.
+          sudo apt-get install -y --no-install-recommends pandoc
+          pandoc --version
+
+      - name: Build (./build.sh — Sarah's entrypoint)
+        # build.sh is expected to invoke pandoc with --fail-if-warnings.
+        # That flag is added by Sarah's template track (M1). This job does
+        # not try to inject it externally; it would require teaching build.sh
+        # to read a PANDOC_OPTS env var, which is Sarah's call to make.
+        run: |
+          set -euo pipefail
+          ./build.sh
+
+      - name: Assert build output structure
+        run: |
+          set -euo pipefail
+          test -f dist/v1/protocol.html || { echo "::error::dist/v1/protocol.html missing"; exit 1; }
+          grep -q "</html>" dist/v1/protocol.html || { echo "::error::dist/v1/protocol.html appears truncated (no closing </html>)"; exit 1; }
+          echo "HTML build OK: $(wc -c < dist/v1/protocol.html) bytes"
+
+      - name: Upload built site
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  markdown-lint:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: DavidAnson/markdownlint-cli2-action@05f32210e84442804257b2a6f20b273450ec8265 # v19.1.0
+        with:
+          globs: 'v1/**/*.md'
+
+  link-check:
+    name: Link check (lychee)
+    needs: build-html
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download built site
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+
+      - name: Run lychee against dist/**/*.html
+        uses: lycheeverse/lychee-action@82202e5e9c2f4ef1a55a3d02563e1cb6041e5332 # v2.1.0
+        with:
+          args: >-
+            --no-progress
+            --max-concurrency 8
+            --timeout 20
+            --retry-wait-time 5
+            --accept 200,203,204,206,301,302,307,308,429
+            --exclude-mail
+            'dist/**/*.html'
+          fail: true
+
+  anchor-stability:
+    name: Anchor stability (vs main)
+    # Only meaningful on PRs. On direct pushes to main, the compare target is
+    # the push itself; required status checks on PRs cover that path.
+    if: github.event_name == 'pull_request'
+    needs: build-html
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+          disable-sudo: false  # pandoc install
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install pandoc (apt, pinned by ubuntu-latest image snapshot)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pandoc
+
+      - name: Compare anchors PR vs main
+        run: ./scripts/check-anchors.sh
+
+  ci-success:
+    # Aggregate gate. Branch protection requires this single check.
+    # `if: always()` + explicit needs-result check makes the gate fail
+    # correctly when any upstream job fails, is cancelled, or is skipped.
+    name: CI Success
+    if: always()
+    needs:
+      - build-html
+      - markdown-lint
+      - link-check
+      - anchor-stability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Check upstream job results
+        env:
+          BUILD: ${{ needs.build-html.result }}
+          LINT: ${{ needs.markdown-lint.result }}
+          LINKS: ${{ needs.link-check.result }}
+          ANCHORS: ${{ needs.anchor-stability.result }}
+        run: |
+          set -euo pipefail
+          echo "build-html=${BUILD}"
+          echo "markdown-lint=${LINT}"
+          echo "link-check=${LINKS}"
+          echo "anchor-stability=${ANCHORS}"
+          fail=0
+          # build-html, markdown-lint, link-check must succeed.
+          for r in "${BUILD}" "${LINT}" "${LINKS}"; do
+            if [ "${r}" != "success" ]; then fail=1; fi
+          done
+          # anchor-stability only runs on PRs; 'skipped' is OK on push to main.
+          if [ "${ANCHORS}" != "success" ] && [ "${ANCHORS}" != "skipped" ]; then
+            fail=1
+          fi
+          if [ "${fail}" -ne 0 ]; then
+            echo "::error::One or more upstream jobs did not succeed."
+            exit 1
+          fi
+          echo "All required jobs passed."

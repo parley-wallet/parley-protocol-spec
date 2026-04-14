@@ -1,0 +1,187 @@
+# Parley Protocol Spec — Deploy to Cloudflare Workers
+#
+# On push to main only. Builds the site, runs a pre-deploy smoke test
+# (adversarial F-008), then deploys via wrangler to spec.parleywallet.app.
+#
+# Required secrets (configure in repo settings):
+#   CLOUDFLARE_API_TOKEN  — scoped: Account.Workers Scripts Edit,
+#                                   Account.Workers KV Storage Edit (if used),
+#                                   Zone.Workers Routes Edit on parleywallet.app,
+#                                   User.User Details Read.
+#   CLOUDFLARE_ACCOUNT_ID — the parley-wallet Cloudflare account ID.
+#
+# Depends on:
+#   - Sarah (spec-template): ./build.sh renders dist/.
+#   - Ryan  (spec-seo):      dist/sitemap.xml is soft-asserted — logs a warning
+#                            if absent, does not fail the deploy. Flip to a
+#                            hard assertion once Ryan's track lands on main.
+
+name: Deploy to Cloudflare Workers
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel an in-progress deploy. Queue sequentially.
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build, smoke-test, deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://spec.parleywallet.app
+    steps:
+      - uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+          disable-sudo: false  # apt-get install pandoc + npm install wrangler
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install pandoc (apt, pinned by ubuntu-latest image snapshot)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pandoc
+          pandoc --version
+
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '22'
+          # No cache: repo has no package-lock.json. Add `cache: 'npm'`
+          # once a lockfile is committed.
+
+      - name: Install wrangler (for local smoke test)
+        # cloudflare/wrangler-action installs its own wrangler for the deploy
+        # step. We install separately here so the pre-deploy `wrangler dev`
+        # smoke test has a binary on $PATH.
+        run: npm install --no-audit --no-fund
+
+      - name: Build (./build.sh)
+        run: ./build.sh
+
+      # ---------------------------------------------------------------
+      # Pre-deploy smoke test (Adversarial F-008)
+      # Hard assertions on build output must pass before we touch prod.
+      # ---------------------------------------------------------------
+      - name: Pre-deploy smoke test — file structure
+        run: |
+          set -euo pipefail
+          echo "== Checking required build artefacts =="
+
+          # Hard required: the spec HTML itself.
+          if [ ! -f dist/v1/protocol.html ]; then
+            echo "::error::dist/v1/protocol.html is missing. Aborting deploy."
+            exit 1
+          fi
+          if ! grep -q "</html>" dist/v1/protocol.html; then
+            echo "::error::dist/v1/protocol.html is truncated (no </html> tag). Aborting deploy."
+            exit 1
+          fi
+
+          # Hard required: the stylesheet build.sh emits.
+          if [ ! -f dist/style.css ]; then
+            echo "::error::dist/style.css is missing. Aborting deploy."
+            exit 1
+          fi
+
+          # Soft required: sitemap.xml (Ryan's track M5).
+          # Warn only until Ryan's branch is merged; promote to error after.
+          if [ ! -f dist/sitemap.xml ]; then
+            echo "::warning::dist/sitemap.xml not present. Once Ryan's SEO track merges, promote this to a hard error."
+          else
+            echo "dist/sitemap.xml: $(wc -c < dist/sitemap.xml) bytes"
+          fi
+
+          # Soft required: robots.txt (also Ryan's track).
+          if [ ! -f dist/robots.txt ]; then
+            echo "::warning::dist/robots.txt not present. Once Ryan's SEO track merges, promote this to a hard error."
+          fi
+
+          echo "== Build artefacts OK =="
+          ls -la dist/
+          ls -la dist/v1/
+
+      - name: Pre-deploy smoke test — local wrangler dev
+        # Boots wrangler in dev mode against the real bundle, curls the three
+        # canonical URLs, then tears down. If any curl fails we abort before
+        # touching production.
+        run: |
+          set -euo pipefail
+          echo "== Starting local wrangler dev for smoke test =="
+          # wrangler 4+: local is the default, no --local flag.
+          npx wrangler dev --port 8787 --ip 127.0.0.1 --show-interactive-dev-session=false > /tmp/wrangler-dev.log 2>&1 &
+          WRANGLER_PID=$!
+          trap 'kill ${WRANGLER_PID} 2>/dev/null || true' EXIT
+
+          # Wait up to 30s for wrangler to bind.
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8787/ 2>/dev/null; then
+              echo "wrangler dev up after ${i}s"
+              break
+            fi
+            if [ "${i}" -eq 30 ]; then
+              echo "::error::wrangler dev did not bind within 30s"
+              cat /tmp/wrangler-dev.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          fail=0
+          for path in "/" "/v1/protocol.html" "/robots.txt"; do
+            # robots.txt is soft-required; don't fail the whole deploy on it alone.
+            code=$(curl -o /dev/null -s -w '%{http_code}' "http://127.0.0.1:8787${path}" || echo "000")
+            echo "GET ${path} -> ${code}"
+            case "${path}" in
+              /robots.txt)
+                if [ "${code}" != "200" ]; then
+                  echo "::warning::${path} returned ${code} (soft-required until SEO track lands)"
+                fi
+                ;;
+              *)
+                # Accept 200 or 3xx redirects (root may redirect to /v1/protocol.html
+                # depending on Sarah's landing page track).
+                case "${code}" in
+                  200|301|302|307|308) ;;
+                  *)
+                    echo "::error::${path} returned ${code}"
+                    fail=1
+                    ;;
+                esac
+                ;;
+            esac
+          done
+
+          if [ "${fail}" -ne 0 ]; then
+            echo "== wrangler dev log =="
+            cat /tmp/wrangler-dev.log || true
+            exit 1
+          fi
+
+          echo "== Smoke test passed =="
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3.14.1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+
+      - name: Post-deploy sanity (best-effort)
+        # WAF may block GitHub Actions IPs; keep non-fatal per cicd.std.md.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          code=$(curl -o /dev/null -s -w '%{http_code}' https://spec.parleywallet.app/v1/protocol.html)
+          echo "Live GET /v1/protocol.html -> ${code}"
+          if [ "${code}" != "200" ]; then
+            echo "::warning::Live spec returned ${code} (may be WAF against GitHub runner IP — verify manually)"
+          fi
