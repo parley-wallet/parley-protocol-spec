@@ -1,6 +1,8 @@
-build/
 dist/
 node_modules/
 .DS_Store
 *.swp
 *.tmp
+
+# build/ holds pandoc template + lua filters + SEO head partial (source, commit these).
+# Anything a build step generates transiently inside build/ should be listed below.

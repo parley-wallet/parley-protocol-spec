@@ -1,0 +1,51 @@
+{
+  "title": "Parley: A Privacy-Preserving Age Verification Protocol",
+  "description": "Normative specification of the Parley zero knowledge age verification protocol. Defines cryptographic primitives, wire formats, and protocol flows for the issuance, proof, and verification roles. A wallet holding a date of birth credential proves it satisfies an age threshold to a verifier without revealing the date of birth, credential signature, or any other identifying information. Uses Groth16 over BLS12-381, Pedersen commitments on Jubjub, RedJubjub credential signatures, Ed25519 issuer attestations, Blake2s-256 hashing, and PKCE session binding.",
+  "upload_type": "publication",
+  "publication_type": "technicalnote",
+  "access_right": "open",
+  "license": "CC-BY-4.0",
+  "language": "eng",
+  "keywords": [
+    "age verification",
+    "zero knowledge proof",
+    "Groth16",
+    "BLS12-381",
+    "Jubjub",
+    "Pedersen commitment",
+    "RedJubjub",
+    "Ed25519",
+    "Blake2s",
+    "privacy preserving",
+    "cryptographic protocol",
+    "identity",
+    "specification"
+  ],
+  "creators": [
+    {
+      "name": "Maelstrom AI Pty Ltd",
+      "affiliation": "Maelstrom AI Pty Ltd ATF Maelstrom AI Holding Trust"
+    }
+  ],
+  "communities": [],
+  "related_identifiers": [
+    {
+      "identifier": "https://spec.parleywallet.app/v1/protocol",
+      "relation": "isIdenticalTo",
+      "resource_type": "publication-technicalnote"
+    },
+    {
+      "identifier": "https://github.com/parley-wallet/parley-protocol-spec",
+      "relation": "isSupplementTo",
+      "resource_type": "software"
+    }
+  ],
+  "references": [
+    "Ben-Sasson, E., Chiesa, A., Tromer, E., Virza, M. Scalable Zero Knowledge via Cycles of Elliptic Curves. CRYPTO 2014.",
+    "Groth, J. On the Size of Pairing-Based Non-interactive Arguments. EUROCRYPT 2016.",
+    "Bowe, S., Chiesa, A., Green, M., Miers, I., Mishra, P., Wu, H. Zexe: Enabling Decentralized Private Computation. 2018.",
+    "RFC 7693, The BLAKE2 Cryptographic Hash and Message Authentication Code.",
+    "RFC 8032, Edwards-Curve Digital Signature Algorithm (EdDSA).",
+    "RFC 7636, Proof Key for Code Exchange (PKCE)."
+  ]
+}
