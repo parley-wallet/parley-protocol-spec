@@ -1,0 +1,65 @@
+{
+  "title": "Parley: A Privacy-Preserving Age Verification Protocol",
+  "description": "Normative specification of the Parley zero knowledge age verification protocol. Specifies cryptographic constructions (Groth16 over BLS12-381, Pedersen commitments, RedJubjub credential signatures, Ed25519 issuer attestations, Blake2s-256 and SHA-256 hashing, PKCE session binding), wire formats, and protocol flows for issuance, proof generation, and verification. Implementations conforming to this specification are interoperable across the issuance, proof, and verification roles.",
+  "version": "1.0.0",
+  "upload_type": "publication",
+  "publication_type": "technicalnote",
+  "language": "eng",
+  "access_right": "open",
+  "license": "cc-by-4.0",
+  "keywords": [
+    "zero knowledge proof",
+    "age verification",
+    "privacy",
+    "Groth16",
+    "BLS12-381",
+    "Pedersen commitment",
+    "RedJubjub",
+    "Ed25519",
+    "Blake2s",
+    "PKCE",
+    "cryptographic protocol",
+    "identity"
+  ],
+  "creators": [
+    {
+      "name": "Maelstrom AI Pty Ltd ATF Maelstrom AI Holding Trust",
+      "affiliation": "Maelstrom AI Pty Ltd",
+      "type": "organizational"
+    }
+  ],
+  "contributors": [
+    {
+      "name": "O'Connor, Tim",
+      "type": "Editor",
+      "affiliation": "Maelstrom AI Pty Ltd"
+    }
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://spec.parleywallet.app/v1/protocol.html",
+      "relation": "isIdenticalTo",
+      "resource_type": "publication-technicalnote",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://github.com/parley-wallet/parley-protocol-spec",
+      "relation": "isSupplementTo",
+      "resource_type": "software",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://github.com/parley-wallet/parley-crypto",
+      "relation": "isDocumentedBy",
+      "resource_type": "software",
+      "scheme": "url"
+    }
+  ],
+  "references": [
+    "Hopwood, D. et al., 'Zcash Protocol Specification', Version 2022.3.8 [NU5 proofs].",
+    "Saarinen, M.-J., Aumasson, J.-P., 'The BLAKE2 Cryptographic Hash and Message Authentication Code (MAC)', RFC 7693, November 2015.",
+    "Josefsson, S., Liusvaara, I., 'Edwards-Curve Digital Signature Algorithm (EdDSA)', RFC 8032, January 2017.",
+    "Sakimura, N. et al., 'Proof Key for Code Exchange by OAuth Public Clients', RFC 7636, September 2015."
+  ],
+  "notes": "Australian Provisional Patent Application No. 2026901546, filed 26 February 2026 by Maelstrom AI Pty Ltd. Royalty-free licence granted to any person implementing this specification under the terms set out in the document's Copyright and Licence Notice, with defensive termination against litigants."
+}

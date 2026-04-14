@@ -1,0 +1,35 @@
+# Parley Protocol Spec — CODEOWNERS
+#
+# Every file requires review by the repo owner. The normative protocol
+# document is called out explicitly so that branch-protection rules
+# requiring CODEOWNERS review gate every change to the spec itself
+# (Adversarial F-020).
+#
+# IMPORTANT: CODEOWNERS alone does not enforce review. It only identifies
+# who is notified. The two pieces that turn this into an actual control
+# are configured at the GitHub UI level (Settings -> Branches -> main):
+#
+#   1. Require a pull request before merging.
+#   2. Require review from Code Owners.
+#   3. Required approvals: 1 (minimum; 2 preferred per cicd.std.md §3).
+#   4. Dismiss stale reviews on new commits.
+#   5. Require status check "CI Success" to pass.
+#   6. Require signed commits.
+#
+# TODO(tim): configure the above rules on origin/main. See the
+# companion note in README / a follow-up issue.
+
+*                 @timoconnor
+
+# The normative spec itself. Any change here alters claims that
+# implementations in the parley-wallet org rely on; always require
+# explicit owner review.
+/v1/protocol.md   @timoconnor
+
+# CI and supply-chain files — any change alters the build or deploy
+# chain. Explicit entries keep them visible in review requests even
+# if a broader pattern later reassigns other paths.
+/.github/         @timoconnor
+/build.sh         @timoconnor
+/wrangler.toml    @timoconnor
+/scripts/         @timoconnor
