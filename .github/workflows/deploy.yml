@@ -86,16 +86,16 @@ jobs:
             exit 1
           fi
 
-          # Hard required: the stylesheet build.sh emits.
-          if [ ! -f dist/style.css ]; then
-            echo "::error::dist/style.css is missing. Aborting deploy."
+          # Hard required: the stylesheets build.sh emits.
+          if [ ! -f dist/styles/main.css ] || [ ! -f dist/styles/print.css ]; then
+            echo "::error::dist/styles/{main,print}.css is missing. Aborting deploy."
             exit 1
           fi
 
-          # Soft required: sitemap.xml (Ryan's track M5).
-          # Warn only until Ryan's branch is merged; promote to error after.
+          # Hard required: sitemap.xml (track M5).
           if [ ! -f dist/sitemap.xml ]; then
-            echo "::warning::dist/sitemap.xml not present. Once Ryan's SEO track merges, promote this to a hard error."
+            echo "::error::dist/sitemap.xml missing. Aborting deploy."
+            exit 1
           else
             echo "dist/sitemap.xml: $(wc -c < dist/sitemap.xml) bytes"
           fi

@@ -53,7 +53,7 @@ function Blocks(blocks)
     table.insert(out, block)
     if block.t == "Header" and block.identifier and block.identifier ~= "" then
       local html = string.format(
-        '<a class="anchor" href="#%s" aria-label="Permalink to this section" tabindex="-1">#</a>',
+        '<a class="anchor" href="#%s" aria-label="Permalink to this section">#</a>',
         block.identifier
       )
       table.insert(out, pandoc.RawBlock("html", html))

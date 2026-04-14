@@ -6,7 +6,7 @@
 | Version | 1.0.0 |
 | Status | Stable |
 | Date | 2026-04-13 |
-| Canonical URL | `https://spec.parleywallet.app/v1/protocol.html` |
+| Canonical URL | `https://spec.parleywallet.app/v1/protocol` |
 | Source repository | `https://github.com/parley-wallet/parley-protocol-spec/tree/v1.0.0` |
 | Errata | `https://github.com/parley-wallet/parley-protocol-spec/issues` |
 | Authors | Maelstrom AI Pty Ltd ATF Maelstrom AI Holding Trust (ABN 61 633 823 792), PO Box 169, St Arnaud VIC 3478, Australia |
@@ -54,26 +54,26 @@ If You institute patent litigation against Maelstrom AI Pty Ltd or any other imp
 
 ## Table of Contents
 
-1. [Introduction](#1-introduction)
-2. [Terminology and Conventions](#2-terminology-and-conventions)
-3. [Protocol Overview](#3-protocol-overview)
-4. [Curve Parameters](#4-curve-parameters)
-5. [Domain Separation Tags](#5-domain-separation-tags)
-6. [System Constants](#6-system-constants)
-7. [Hash Function Specifications](#7-hash-function-specifications)
-8. [RedJubjub Signature Scheme](#8-redjubjub-signature-scheme)
-9. [Pedersen Commitment Scheme](#9-pedersen-commitment-scheme)
-10. [Ed25519 Attestation Scheme](#10-ed25519-attestation-scheme)
-11. [Issuance Protocol](#11-issuance-protocol)
-12. [Age Verification Circuit](#12-age-verification-circuit)
-13. [Prover and Verifier Protocols](#13-prover-and-verifier-protocols)
-14. [Verification Protocol](#14-verification-protocol)
-15. [Wire Formats](#15-wire-formats)
-16. [Conformance](#16-conformance)
-17. [Security Considerations](#17-security-considerations)
-18. [Privacy Considerations](#18-privacy-considerations)
-19. [IANA Considerations](#19-iana-considerations)
-20. [References](#20-references)
+1. [Introduction](#introduction)
+2. [Terminology and Conventions](#terminology-and-conventions)
+3. [Protocol Overview](#protocol-overview)
+4. [Curve Parameters](#curve-parameters)
+5. [Domain Separation Tags](#domain-separation-tags)
+6. [System Constants](#system-constants)
+7. [Hash Function Specifications](#hash-function-specifications)
+8. [RedJubjub Signature Scheme](#redjubjub-signature-scheme)
+9. [Pedersen Commitment Scheme](#pedersen-commitment-scheme)
+10. [Ed25519 Attestation Scheme](#ed25519-attestation-scheme)
+11. [Issuance Protocol](#issuance-protocol)
+12. [Age Verification Circuit](#age-verification-circuit)
+13. [Prover and Verifier Protocols](#prover-and-verifier-protocols)
+14. [Verification Protocol](#verification-protocol)
+15. [Wire Formats](#wire-formats)
+16. [Conformance](#conformance)
+17. [Security Considerations](#security-considerations)
+18. [Privacy Considerations](#privacy-considerations)
+19. [IANA Considerations](#iana-considerations)
+20. [References](#references)
 21. [Appendix A: Test Vectors](#appendix-a-test-vectors)
 22. [Appendix B: Informative Examples](#appendix-b-informative-examples)
 23. [Appendix C: Data Structures](#appendix-c-data-structures)
