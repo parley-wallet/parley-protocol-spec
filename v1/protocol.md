@@ -111,15 +111,11 @@ The protocol operates entirely without persistent user accounts at the Verifier.
 
 The protocol involves five roles. Two are Parley-operated services: the Issuer (issues attestations and credentials) and the Verifier (verifies proofs). Two are third-party customer roles: the Issuing Party (authenticates users and requests attestations from the Issuer) and the Relying Party (consumes verification results). The fifth is the user-controlled Wallet, which stores the credential and generates proofs on demand. Section 3.1 describes the five roles in detail.
 
-A fourth party, the Relying Party, is the consumer of the verification result. The Relying Party initiates a verification by requesting a challenge from the Verifier and consuming the result via a PKCE redemption step. Some deployments collapse the Verifier and Relying Party into a single entity. The protocol does not require this separation but supports it.
-
 Section 3 develops this model further. Section 11 specifies the issuance protocol as a numbered flow. Section 14 specifies the verification protocol as a numbered flow.
 
 ### 1.4 Protocol Layers
 
-The protocol has three layers, each addressed by a distinct part of this document.
-
-The cryptographic layer specifies the primitives: BLS12-381 and Jubjub curves, the Pedersen commitment, the RedJubjub signature scheme, Ed25519 attestations, Blake2s-256 and SHA-256 hashing. It is covered in Sections 4 through 10.
+The protocol is organised in layers, each addressed by a distinct part of this document. The cryptographic layer specifies the primitives: BLS12-381 and Jubjub curves, the Pedersen commitment, the RedJubjub signature scheme, Ed25519 attestations, Blake2s-256 and SHA-256 hashing. It is covered in Sections 4 through 10.
 
 The circuit layer specifies the Groth16 R1CS arithmetic circuit that proves the conjunction of commitment opening, in circuit signature verification, and age comparison. It is covered in Section 12.
 
@@ -537,9 +533,7 @@ The following DSTs are used by conforming v1.0 implementations.
 | Constant | UTF-8 value | Length (bytes) | Hex | Used by |
 |---|---|---|---|---|
 | `CRED_V2_DST` | `zerokp.cred.v2` | 14 | `7a65726f6b702e637265642e7632` | Credential prehash (Section 8.2); circuit constants hash (Section 12.6) |
-| `CHALLENGE_DST` | `zerokp.challenge.v1` | 19 | `7a65726f6b702e6368616c6c656e67652e7631` | RP challenge construction (Section 13.2) |
 | `NULLIFIER_DST` | `parley.nullifier.pedersen.v1` | 28 | `7061726c65792e6e756c6c69666965722e706564657273656e2e7631` | Nullifier off circuit (Section 9.4) and in circuit; circuit constants hash |
-| `CHALLENGE_ID_DST` | `challenge_id_v1` | 15 | `6368616c6c656e67655f69645f7631` | Challenge identifier derivation |
 | `DOB_ATTESTATION_DST` | `parley.attestation.dob.v1` | 25 | `7061726c65792e6174746573746174696f6e2e646f622e7631` | Ed25519 attestation message (Section 10.2) |
 | `VK_ID_DST` | `zerokp.vk.id.v1` | 15 | `7a65726f6b702e766b2e69642e7631` | Groth16 verifying key identifier derivation (Section 13.7) |
 | `PARLEY_RJ_PERSONALIZATION` | `ParleyRJ` | 8 | `5061726c6579524a` (the eight bytes `50 61 72 6c 65 79 52 4a`) | Blake2s personalisation for the RedJubjub challenge hash (Section 8.4) |
@@ -1123,7 +1117,7 @@ The request body carries `dob_days` (signed i32), an optional `session_id`, and 
 
 **Child-DOB guard.** The Issuer MUST reject any attestation creation request where the resulting age at request time is less than 6574 days (approximately 18 years). This guard protects against mass enrolment of minors through generic client integrations; Issuing Parties with legitimate under-18 issuance needs (government agencies, regulated youth services) MUST obtain a separately-provisioned `CLIENT_ID` flagged for under-18 issuance. Requests from non-flagged clients that would produce an attestation for a minor MUST be rejected with a dedicated error code.
 
-**Constant-time authentication check.** The Issuer MUST compare the received HMAC-SHA256 signature against the computed signature using `hmac::Mac::verify_slice` or an equivalent platform primitive (Section 17.12). String comparison is prohibited.
+**Constant-time authentication check.** The Issuer MUST compare the received HMAC-SHA256 signature against the computed signature using `hmac::Mac::verify_slice` or an equivalent platform primitive (Section 17.5). String comparison is prohibited.
 
 **Issuer response.** On success, the Issuer:
 
@@ -1292,21 +1286,9 @@ Target requirements for a full registry implementation:
 5. Registry state SHOULD be stored inside the same platform secure storage boundary as `dob_days` and `r_bits` (Section 11.7). The registry SHOULD be integrity protected; a Wallet that cannot verify the registry's integrity on load SHOULD refuse to generate proofs until the registry is re-established through a trusted channel.
 6. The Wallet SHOULD NOT silently adopt a verifying key shipped alongside a credential at enrolment or verification time. Any key rotation SHOULD flow through the registry update path.
 
-The wallet issuer registry is independent of the Verifier's issuer registry (Section 2.3, Section 14.6 step 10f).
+The wallet issuer registry is independent of the Verifier's issuer registry (Section 2.2, Section 14.6 step 10f).
 
 **Implementation status in v1.0.** The v1.0 reference wallet-sdk does not yet implement a signed, integrity-protected issuer registry. Until it does, wallets accept the `issuer_vk` transmitted in the credential header after verifying the RedJubjub signature over the credential prehash. Deployments concerned about issuer key substitution SHOULD bundle a trusted issuer list with the wallet binary (an immutable asset shipped in the application bundle, verified at build time) until a runtime registry ships; a compile-time list provides a weaker form of the same guarantees without the runtime update path.
-
-### 11.6 Length Prefixed Field Helper
-
-Where a hash takes length prefixed inputs (for example, the `write_length_prefixed` helper exposed in the reference implementation), the helper is:
-
-```
-write_length_prefixed(h, data):
-    h.update(LE(len(data), 4))               // 4 byte LE length prefix
-    h.update(data)
-```
-
-Implementations MUST reject inputs whose length exceeds `u32::MAX` (4 294 967 295). The v1.0 `rp_challenge` preimage does NOT use this helper (see Section 13.2); the attestation preimage in Section 10.2 uses a single-byte length prefix for `issuer_id`. The helper is provided for internal consistency and for use by future protocol versions.
 
 ---
 
@@ -1395,7 +1377,7 @@ These values are normative for the v1.0 circuit and are pinned in the manifest (
 
 ### 12.6 Circuit Constants Hash
 
-The circuit constants hash is a Blake2s-256 fingerprint over all constants whose change would alter the R1CS structure. Implementations SHOULD compute and verify this hash at startup and SHOULD reject any proving or verifying key whose manifest does not pin a matching value.
+The circuit constants hash is a Blake2s-256 fingerprint over all constants whose change would alter the R1CS structure. Implementations MUST compute and verify this hash at startup and MUST reject any proving or verifying key whose manifest does not pin a matching value.
 
 ```
 compute_circuit_constants_hash() = H_b2s(
@@ -1646,7 +1628,7 @@ Preflight(challenge, credential, dob_days, r_bits):
        wallet's loaded proving key's manifest vk_id.
 ```
 
-If any preflight check fails, the Wallet SHOULD NOT attempt to generate a proof. The Wallet SHOULD surface the relevant failure to the user (for example, "your credential has expired; please re-enrol"). The Wallet MUST NOT submit a proof that does not pass local verification.
+If preflight step 3 (credential expiry) fails, the Wallet MUST NOT generate a proof. If any other preflight step fails, the Wallet SHOULD NOT generate a proof and in all cases MUST NOT submit a proof that does not pass local verification. The Wallet SHOULD surface the relevant failure to the user (for example, "your credential has expired; please re-enrol").
 
 Source: derived from patent specification §5.2 step 8.
 
@@ -1791,8 +1773,6 @@ A conforming Verifier MUST validate `len(proof_bytes) == 192` before parsing. Th
 ## 14. Verification Protocol
 
 This section specifies the full verification flow as a numbered sequence of normative steps.
-
-### 14.0 Integration Profiles
 
 Parley defines two integration profiles. Both terminate at the same Verifier; they differ in how the Relying Party authenticates to the Verifier and in whether a Parley-operated HTTP intermediary (the simple verification service) relays the call.
 
@@ -2385,9 +2365,9 @@ Three profiles are defined. An implementation MAY conform to one or more profile
 - Section 8 (RedJubjub Signature Scheme; verification at minimum, signing if it generates credentials)
 - Section 9 (Pedersen Commitment Scheme; commit, validate, nullifier)
 - Section 10.4 and 10.5 (Verify Attestation, Verify with Freshness)
-- Section 11.2 (Issuance Steps from the wallet's perspective: Steps 1, 3, 11, 12)
-- Sections 11.3, 11.4, 11.5 (audit log expectations, secure storage, issuer registry; 11.5 targets are SHOULD-level in v1.0)
-- Section 12 (Age Verification Circuit; specifically the prover side)
+- Section 11.4 (wallet steps 1, 3, 11, 12: generate `r_bits`, call blind issuance, verify the returned credential, persist to secure storage)
+- Sections 11.7 and 11.8 (wallet secure storage; wallet issuer registry where supported; registry targets are SHOULD-level in v1.0)
+- Section 12 (Age Verification Circuit; prover side)
 - Section 13.4 to 13.6 (PKCE participation, Wallet preflight, public input assembly)
 - Section 13.8 (Proving key download and integrity)
 - Section 13.9 (Proof generation)
@@ -2397,21 +2377,22 @@ Three profiles are defined. An implementation MAY conform to one or more profile
 
 **Verifier Profile.** An implementation acting as a Parley Verifier MUST implement:
 - Section 7 (Hash Function Specifications)
-- Section 8.6 (RedJubjub Verify, used out of circuit for issuer registry validation if the Verifier supports off circuit signature checks; not strictly required since the in circuit check is the authoritative one)
 - Section 9.4 (Nullifier; for ban enforcement)
-- Section 12 (Age Verification Circuit; specifically the verifier side)
+- Section 12 (Age Verification Circuit; verifier side)
 - Section 13.1, 13.2, 13.4, 13.6, 13.7, 13.10 (Groth16 parameters, RP hash construction, PKCE validation, public input assembly, VK identification, proof verification)
 - Section 14.2, 14.6, 14.7, 14.9 (Challenge generation, verifier side steps, result redemption, replay protection and ban enforcement)
-- Sections 15.6, 15.7, 15.9, 15.10 (public input JSON, RP challenge bytes, challenge record, proof submission payload)
+- Sections 15.6, 15.7, 15.9, 15.10 (public input JSON, RP challenge bytes, CachedChallenge, proof submission payload)
 - Sections 17.5, 17.7, 17.8, 17.10, 17.13 (constant time operations, validation requirements, failure modes, algorithm agility, denial of service considerations)
+
+A Verifier MAY additionally implement Section 8.6 (off-circuit RedJubjub verify) for issuer-registry validation at ingest; this is operationally useful but not required for conformance because the in-circuit signature check inside the Groth16 verification is authoritative.
 
 **Issuer Profile.** An implementation acting as a Parley Issuer MUST implement:
 - Section 7 (Hash Function Specifications)
 - Section 8 (RedJubjub Signature Scheme; full sign and self-verify)
 - Section 9 (Pedersen Commitment Scheme; commit, validate)
-- Section 10 (Ed25519 Attestation Scheme; full create or verify per embodiment)
-- Section 11 (Issuance Protocol; all steps the issuance server performs)
-- Sections 11.3 and 11.4 (audit log retention at issuance, Wallet Storage expectations)
+- Section 10 (Ed25519 Attestation Scheme; create per Section 10.3 and self-verify per Section 10.4)
+- Section 11 (Issuance Protocol; all steps the Issuer performs)
+- Sections 11.6 and 11.7 (audit log retention at issuance; Wallet Storage expectations)
 - Section 15 wire formats it produces or consumes
 - Section 17 security requirements applicable to issuance operation
 
@@ -2569,7 +2550,7 @@ Implementations MUST validate inputs at trust boundaries. The following table li
 | `VerificationKey::from_bytes` | in prime order subgroup, not identity, not small order |
 | `Signature::from_bytes` | `R` in subgroup, `s` canonical |
 | `validate_nonce` | length 32, ≥ 8 distinct bytes, not all zero |
-| `Attestation::verify_with_timestamp` | `timestamp >= now - 3600`, `timestamp <= now + 60` |
+| `Attestation::verify_with_timestamp` | `timestamp >= now - 7200`, `timestamp <= now + 60` |
 | `verifier::verify_age_snark` | `vk_id` registered, proof byte length validates, public inputs assemble |
 
 Validation failures MUST return errors. Implementations MUST NOT panic, abort, or coerce invalid inputs.
@@ -2876,41 +2857,22 @@ H_b2s(b"") = 69217a3079908094e11121d042354a7c1f55b6482ca1a51e1b250dfd1ed0eef9
 H_b2s(b"abc") = 508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982
 ```
 
-### A.5 RP Challenge KAT
+### A.5 RP Hash KAT
+
+`rp_challenge` is minted by the Verifier as 32 bytes from a CSPRNG (Section 13.2). The KAT below pins a fixed input to exercise the Blake2s wrap step independently of the random source.
 
 ```
-Inputs:
-    origin = "https://example.com"         // 19 bytes ASCII
-    nonce  = 0x2a × 32                     // 32 bytes of 0x2a
-    DST    = "zerokp.challenge.v1"         // 19 bytes ASCII
-
-Construction (v1.0, no length prefix; see Section 13.2):
-    bytes = origin || nonce || DST                  // 70 bytes total
-
-Preimage hex (70 bytes):
-    68747470733a2f2f6578616d706c652e636f6d2a2a2a2a2a2a2a2a2a2a2a2a2a
-    2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a7a65726f6b702e6368616c6c65
-    6e67652e7631
-
-Output:
-    rp_challenge = SHA-256(bytes)
-                 = 5d925bd49f49dc17a2bd665c2071f771c6081ed17e77957e2a24bb78c84dd6e0
-```
-
-### A.6 RP Hash KAT (Two Step)
-
-```
-Inputs:
-    rp_challenge = output of A.5
+Input:
+    rp_challenge = 0x2a × 32                         // 32 bytes of 0x2a
 
 Construction:
-    rp_hash = Blake2s-256(rp_challenge)
+    rp_hash = Blake2s-256(rp_challenge)              // no personalisation
 
 Output:
-    rp_hash = 658fee40b0d9c86e1af7e7d1f3fe19dd49b592ad849ca5507e174ac64d55d1ba
+    rp_hash = 4fe9dba51f7291fa82614ed6210e7618de5bb7cb3ac5b09dd0b1ecedc6731578
 ```
 
-### A.7 Pedersen Commitment KAT: Age 25
+### A.6 Pedersen Commitment KAT: Age 25
 
 ```
 Inputs:
@@ -2927,7 +2889,7 @@ Output:
     commitment_hex = e437495ee5c2872cb408674c213b95f6efd086fda4687997a35321f0ad2d79aa
 ```
 
-### A.8 Pedersen Commitment KAT: Age 10
+### A.7 Pedersen Commitment KAT: Age 10
 
 ```
 Inputs:
@@ -2941,7 +2903,7 @@ Output:
     commitment_hex = 2b4a7ee14d0978e38c6cb90ade9d85297cfcf46823e45dc868ad5e0f09e6df0e
 ```
 
-### A.9 Manifest Values for the v1.0 Production VK
+### A.8 Manifest Values for the v1.0 Production VK
 
 ```
 vk_id                  = 2031517468
@@ -2961,7 +2923,7 @@ schema_bytes           = 12
 
 These values are the gold-standard pin for v1.0 deployments.
 
-### A.10 Credential Prehash KAT
+### A.9 Credential Prehash KAT
 
 ```
 Inputs:
@@ -2992,7 +2954,7 @@ Blake2s-256 digest (32 bytes):
     cad799210d579b23d4a610522c8273ed7020a92e6206298e025567972ab9a75a
 ```
 
-### A.11 Ed25519 Attestation KAT
+### A.10 Ed25519 Attestation KAT
 
 ```
 Inputs:
@@ -3032,7 +2994,7 @@ Ed25519 signature (64 bytes; deterministic per [RFC8032]):
     3659588ff0493203edfbd9e6d0bdc1c7a60661e16edc2eff71f9b2404a898a0c
 ```
 
-### A.12 Public Input Vector: End to End
+### A.11 Public Input Vector: End to End
 
 From the existing committed real proof in `parley-crypto/crypto-e2e-tests/tests/test_native_verify.rs`.
 
@@ -3078,9 +3040,9 @@ Verification result: valid (under the matching VK from
 test_native_verify; not the production VK).
 ```
 
-### A.13 Notes on Test Vector Maturity (Informative)
+### A.12 Notes on Test Vector Maturity (Informative)
 
-The hex outputs in A.5 through A.12 were materialised from the reference implementation's deterministic test harness at `parley-crypto/crypto-e2e-tests/tests/spec_vectors.rs`, which is the canonical source for the values pinned in this appendix. The harness is driven by `ChaCha20Rng::from_seed([0u8; 32])` and re-runs bit-for-bit on every invocation; any drift between this appendix and the harness output is a defect in the implementation or in this document.
+The hex outputs in A.5 through A.11 were materialised from the reference implementation's deterministic test harness at `parley-crypto/crypto-e2e-tests/tests/spec_vectors.rs`, which is the canonical source for the values pinned in this appendix. The harness is driven by `ChaCha20Rng::from_seed([0u8; 32])` and re-runs bit-for-bit on every invocation; any drift between this appendix and the harness output is a defect in the implementation or in this document.
 
 Implementations conforming to v1.0.0 MUST reproduce these outputs and SHOULD cross check them against the reference harness. Implementations failing to reproduce a pinned vector are non-conforming.
 
