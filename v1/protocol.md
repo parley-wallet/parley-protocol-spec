@@ -573,7 +573,7 @@ The active DSTs in Section 5.1 are byte distinct and no two share a prefix. Impl
 | `SESSION_TIMEOUT_SECONDS` | 120 | seconds | Issuance session timeout (2 minutes) |
 | `ATTESTATION_MAX_AGE_SECONDS` | 7200 | seconds | Ed25519 attestation freshness window (2 hours). Also the retention floor for the nonce single-use store (Section 10.6). |
 | `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS` | 60 | seconds | Maximum permitted clock skew when an attestation timestamp is ahead of local time |
-| `MAX_VALIDITY_SECONDS` | 3 153 600 000 | seconds | Hard ceiling on credential lifetime (`exp - iat`); 36 500 days (approximately 100 years, using 86 400 seconds per day). Operator policy SHOULD be tighter; 90 days (7 776 000) is a conservative default for general deployments. |
+| `MAX_VALIDITY_SECONDS` | 3 153 600 000 | seconds | Hard ceiling on credential lifetime (`exp - iat`); 36 500 days (approximately 100 years, using 86 400 seconds per day). The RECOMMENDED default for general deployments is 7 300 days (20 years, 630 720 000 seconds) so the credential ages with the user (Section 17.12). |
 
 The `SESSION_TIMEOUT_SECONDS` value is given here in seconds. The reference implementation declares the equivalent constant as `SESSION_TIMEOUT_MS = 120_000` (milliseconds). Implementations MUST treat the canonical value as 120 seconds and convert to other units as needed for their environment.
 
@@ -1197,9 +1197,10 @@ Step 7.  The Issuer constructs CredMsgV2:
          `CLOCK_SKEW_TOLERANCE_SECONDS` of its wall-clock current
          time. The Issuer MUST set `exp > iat` and
          `exp - iat <= MAX_VALIDITY_SECONDS` (3 153 600 000;
-         36 500 days, ~100 years). 90 days is the recommended default
-         for general deployments; longer validity periods SHOULD NOT
-         be issued without a documented deployment reason.
+         36 500 days, ~100 years). The RECOMMENDED default for
+         general deployments is 7 300 days (20 years) so the
+         credential ages with the user; see Section 17.12 for the
+         operator tradeoffs around shorter or longer values.
 
          The Issuer computes the credential prehash (Section 8.2),
          Blake2s hashes it, and signs the hash via RedJubjub
@@ -2599,15 +2600,17 @@ Per the project policy "no migration code", old `vk_id` values are retired by re
 
 v1.0 relies on wallet-side enforcement of credential expiry. The Verifier does not receive `iat` or `exp`; they are inside the witness and never cross the wire. A malicious Wallet that skips preflight (Section 13.5) can present an expired credential and obtain a successful verification. The protocol does not defend against this failure mode at the Verifier.
 
-Relying Parties and Verifier operators MUST require their Issuers to issue short-lived credentials whenever stronger guarantees of expiry enforcement are required. With a credential lifetime of 30 days or less, the window of misuse by a malicious Wallet is bounded.
+Relying Parties and Verifier operators that require stronger guarantees of expiry enforcement MAY require their Issuers to issue credentials with shorter validity periods; the window of misuse by a malicious Wallet is bounded by the credential lifetime. This is a deliberate departure from the default posture (Section 17.12) that credentials age with the user, and SHOULD be justified against documented operational needs rather than adopted by default.
 
 A future protocol revision may add `iat` or `exp` to the public input set, pushing the check into the circuit at the cost of two additional multipacked field elements and the associated trusted setup change. v1.0 consciously trades server-side expiry enforcement for smaller submission payload and simpler verifier state.
 
 ### 17.12 Credential Lifetime Recommendations
 
-Issuers SHOULD set credential lifetimes (`exp - iat`) to the shortest window operationally acceptable. The hard ceiling enforced by `MAX_VALIDITY_SECONDS` (Section 6) is 36 500 days (approximately 100 years). The RECOMMENDED gap for general deployments is 30 days.
+Issuers SHOULD set credential lifetimes (`exp - iat`) long enough that the credential ages with the user. The RECOMMENDED default for general deployments is 7 300 days (20 years), which carries a credential issued in childhood through into adulthood without a re-issuance ritual. The hard ceiling enforced by `MAX_VALIDITY_SECONDS` (Section 6) is 36 500 days (approximately 100 years).
 
-Short lifetimes bound the malicious-wallet window described in Section 17.11 and limit the damage from an undetected credential compromise. Deployments with regulated retention or audit requirements MAY use shorter values (for example, daily rotation) at the cost of more frequent issuance round trips.
+The underlying identity fact is stable: a user's date of birth does not change, and re-issuance for its own sake degrades user experience without strengthening the privacy or integrity guarantees of the protocol. The wallet enforces expiry locally (Section 17.11) and a malicious wallet that skips preflight is the adversary bounded by lifetime, not the typical user.
+
+Deployments that need a tighter expiry-enforcement envelope, for example to bound the window of misuse following a compromise disclosed outside the protocol, MAY issue shorter-lived credentials at the cost of more frequent issuance round trips. This is an explicit departure from the default posture and SHOULD be documented against operational needs.
 
 ### 17.13 Denial of Service Considerations
 
@@ -2732,7 +2735,7 @@ The recommended audit log retention period for both the Issuer and the Verifier 
 | Constraint | Effect on the 90 day ceiling |
 |---|---|
 | Regulatory minimums | Typical regulatory guidance for security-event retention (for example, Australian guidance for operational logs and analogous European requirements) sets a floor that 90 days comfortably exceeds. |
-| Maximum credential lifetime | Section 17.12 caps credentials at 36 500 days with 30 days recommended for general deployments; 90 days spans the recommended credential validity window with room for retrospective audit. |
+| Maximum credential lifetime | Section 17.12 recommends 20 year credential lifetimes so the credential ages with the user; audit logs of issuance events need not span the full credential life, and 90 days is sufficient to support incident response and retrospective review of recent issuance activity. |
 | Residual privacy exposure | Long-lived records risk later correlation with external datasets; shorter retention reduces that exposure. |
 | Operational cost | Storing and indexing audit volumes over extended windows is expensive; 90 days is a practical ceiling for typical deployment budgets. |
 
@@ -3063,7 +3066,7 @@ A user, Alice, born 2000-10-16 (`dob_days = 11246`), enrols via an Issuing Party
 5. The Wallet generates 128 bits of randomness from the iOS Secure Enclave CSPRNG. After validation (≥ 8 unique bytes, not all zero), the result is held in memory as `r_bits`.
 6. The Wallet sends `{ "attestation": <base64url>, "r_bits": <base64url 16 bytes> }` to the Issuer at `POST /v1/issuance/blind` over TLS.
 7. The Issuer verifies the attestation signature, freshness (7200 s past, 60 s future), nonce single-use, and `dob_days` within `[-36525, +36525]`. It computes `c = PedersenCommit(11246, r_bits)` (32 bytes).
-8. The Issuer constructs CredMsgV2 with `v = 2`, `kid = "parley.age.v1"` (exactly 14 bytes), `c`, `iat = now`, `exp = now + 90 days`, `schema = "parley.age/1"` (exactly 12 bytes). It computes the prehash, Blake2s hashes it, signs with RedJubjub, and self-verifies.
+8. The Issuer constructs CredMsgV2 with `v = 2`, `kid = "parley.age.v1"` (exactly 14 bytes), `c`, `iat = now`, `exp = now + 7 300 days`, `schema = "parley.age/1"` (exactly 12 bytes). It computes the prehash, Blake2s hashes it, signs with RedJubjub, and self-verifies.
 9. The Issuer returns the SignedCredential to the Wallet and zeroises `dob_days` and `r_bits` from memory. It writes an audit log entry containing the Acme Bank `CLIENT_ID`, timestamp, `kid`, `iat`, `exp`, and schema, with no DOB or randomness.
 10. The Wallet verifies the credential: recomputes `c' = PedersenCommit(11246, r_bits)` and confirms `c' == credential.c_bytes` in constant time, verifies the RedJubjub signature, confirms `iat <= now < exp`. On success, it stores `{ SignedCredential, dob_days = 11246, r_bits }` in the iOS Keychain.
 
@@ -3121,7 +3124,7 @@ Alice's credential expired yesterday (`exp < now`). She attempts to verify.
 2. At preflight (step 5), the Wallet checks `credential.exp > current_time`. The check fails. The Wallet displays "your credential has expired; please re-enrol" and does NOT generate a proof.
 3. If a malicious or buggy Wallet skips preflight, it may submit a proof from an expired credential. The proof verifies cryptographically because the circuit does not bind `exp` to the current time, and the Verifier does not receive `iat` or `exp`. The Verifier CANNOT reject the proof on expiry grounds in v1.0.
 
-Confirmed against the reference `verifier-api/src/routes/verify.rs`: the Verifier calls `parley_crypto_verifier::verify_age_snark(proof_bytes, proof_direction, cutoff_days, rp_hash, issuer_vk_bytes, cred_nullifier, verifying_key_id)` and never sees `iat` or `exp`. The credential body is held only by the Wallet. Expiry enforcement is therefore entirely wallet-side. Relying Parties that require a server-side expiry guarantee MUST require the Issuer to issue short-lived credentials (see Section 17.11 and Section 17.12).
+Confirmed against the reference `verifier-api/src/routes/verify.rs`: the Verifier calls `parley_crypto_verifier::verify_age_snark(proof_bytes, proof_direction, cutoff_days, rp_hash, issuer_vk_bytes, cred_nullifier, verifying_key_id)` and never sees `iat` or `exp`. The credential body is held only by the Wallet. Expiry enforcement is therefore entirely wallet-side. Relying Parties that require a server-side expiry guarantee MAY require the Issuer to issue shorter-lived credentials as one mitigation; this is an explicit departure from the default posture that credentials age with the user (see Section 17.11 and Section 17.12).
 
 ---
 
