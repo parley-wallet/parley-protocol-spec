@@ -2605,7 +2605,7 @@ A future protocol revision may add `iat` or `exp` to the public input set, pushi
 
 ### 17.12 Credential Lifetime Recommendations
 
-Issuers SHOULD set credential lifetimes (`exp - iat`) to the shortest window operationally acceptable. The recommended maximum gap is 365 days. The RECOMMENDED gap for general deployments is 30 days.
+Issuers SHOULD set credential lifetimes (`exp - iat`) to the shortest window operationally acceptable. The hard ceiling enforced by `MAX_VALIDITY_SECONDS` (Section 6) is 36 500 days (approximately 100 years). The RECOMMENDED gap for general deployments is 30 days.
 
 Short lifetimes bound the malicious-wallet window described in Section 17.11 and limit the damage from an undetected credential compromise. Deployments with regulated retention or audit requirements MAY use shorter values (for example, daily rotation) at the cost of more frequent issuance round trips.
 
@@ -2732,7 +2732,7 @@ The recommended audit log retention period for both the Issuer and the Verifier 
 | Constraint | Effect on the 90 day ceiling |
 |---|---|
 | Regulatory minimums | Typical regulatory guidance for security-event retention (for example, Australian guidance for operational logs and analogous European requirements) sets a floor that 90 days comfortably exceeds. |
-| Maximum credential lifetime | Section 17.12 caps credentials at 365 days with 30 days recommended; 90 days spans the typical credential validity window with room for retrospective audit. |
+| Maximum credential lifetime | Section 17.12 caps credentials at 36 500 days with 30 days recommended for general deployments; 90 days spans the recommended credential validity window with room for retrospective audit. |
 | Residual privacy exposure | Long-lived records risk later correlation with external datasets; shorter retention reduces that exposure. |
 | Operational cost | Storing and indexing audit volumes over extended windows is expensive; 90 days is a practical ceiling for typical deployment budgets. |
 
