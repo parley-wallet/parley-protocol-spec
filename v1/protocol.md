@@ -320,7 +320,7 @@ The following table summarises what each party learns under correct operation.
 | Nullifier | No | No | Yes (computes off circuit) | Yes (public input) | No |
 | Issuer verifying key | No | Yes (its own) | Yes (in credential) | Yes (registry) | No |
 | RP hash | No | No | Yes (computes off circuit) | Yes (recomputes) | No |
-| Cutoff days | No | No | Yes | Yes | Yes (its own request parameter) |
+| Cutoff days | No | No | Yes | Yes | Yes (from its own Verifier policy) |
 | Direction (Over / Under) | No | No | Yes | Yes | Yes (derived server side from the RP's origin policy and returned to the RP in the challenge response) |
 | Proof bytes | No | No | Yes (generates) | Yes (verifies) | No |
 | Verification result (pass/fail) | No | No | Yes (locally) | Yes | Yes |
