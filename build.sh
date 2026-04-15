@@ -32,7 +32,7 @@ pandoc "${ROOT}/v1/protocol.md" \
   --standalone \
   --template="${BUILDDIR}/template.html" \
   --lua-filter="${BUILDDIR}/lua/headings.lua" \
-  --syntax-highlighting=tango \
+  --highlight-style=tango \
   --toc \
   --toc-depth=4 \
   --section-divs \
