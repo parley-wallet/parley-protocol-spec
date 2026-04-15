@@ -205,7 +205,7 @@ The following terms are used throughout this document with the precise meanings 
 
 **Wallet.** The user controlled software (typically mobile) that stores Credentials, generates Proofs, and performs the Wallet side steps of the protocol.
 
-**Witness.** The private inputs to the Groth16 prover: the date of birth, the commitment randomness, and the credential signature. Never transmitted.
+**Witness.** The private inputs to the Groth16 prover: the date of birth, the commitment randomness, and the credential signature. Held only by the Wallet at proving time. The witness is never bundled into a transmitted message, and no component is revealed to the Verifier or Relying Party. Individual fields are exchanged between the Wallet and the Issuer during issuance (Section 11).
 
 **Zero Knowledge Proof (ZKP).** A proof that a statement is true that reveals no information about the witness beyond that fact. Parley uses Groth16 [Groth16] over BLS12-381.
 
