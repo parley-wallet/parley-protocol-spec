@@ -187,7 +187,7 @@ The following terms are used throughout this document with the precise meanings 
 
 **Relying Party (RP).** A third-party customer website or application that consumes verification results. The Relying Party requests a challenge from the Verifier (directly for Expert integrations, or via a Parley-operated intermediary for Simple integrations; see Section 14), presents the challenge to the Wallet (typically via QR code or deep link), and redeems the result via PKCE.
 
-**`rp_challenge`.** A 32 byte value minted by the Verifier from a cryptographic random source, transmitted through the Relying Party to the Wallet, and relayed by the Wallet back to the Verifier in the proof submission (Section 14.5). Distinct from `rp_hash`, which is the Blake2s-256 wrap of `rp_challenge` consumed as a circuit public input.
+**`rp_challenge`.** A 32 byte value derived by the Verifier as `SHA-256(origin || nonce || "zerokp.challenge.v1")` where `nonce` is 32 bytes from a CSPRNG. Transmitted through the Relying Party to the Wallet, and relayed by the Wallet back to the Verifier in the proof submission (Section 14.5). Distinct from `rp_hash`, which is the Blake2s-256 wrap of `rp_challenge` consumed as a circuit public input.
 
 **RP Hash.** A 32 byte circuit public input that binds the proof to a specific challenge. Computed as `Blake2s-256(rp_challenge)`. See Section 13.2.
 
@@ -339,8 +339,9 @@ Step B.  The Issuing Party calls the Issuer over an HMAC-SHA256
          Issuing Party's CLIENT_ID.
 Step C.  The Issuer mints a 32 byte nonce and signs an Ed25519
          attestation containing dob_days, the Issuing Party's
-         identifier, a timestamp, and the nonce. The Issuer stores the
-         nonce in its single-use store.
+         identifier, a timestamp, and the nonce. The nonce is not
+         recorded at this point; it is consumed at blind-issuance
+         time (Step G).
 Step D.  The Issuer returns the attestation to the Issuing Party.
 Step E.  The Issuing Party constructs a deep link containing the
          attestation and invokes the Wallet.
@@ -349,7 +350,9 @@ Step F.  The Wallet receives the deep link, generates 128 bits of
          Issuer's blind-issuance endpoint with the attestation and
          r_bits.
 Step G.  The Issuer verifies the Ed25519 signature, freshness bounds,
-         and nonce single use; computes
+         and nonce single use (the nonce is recorded in the consumed-
+         nonce store at this point, with TTL
+         ATTESTATION_NONCE_TTL_SECONDS); computes
          c = PedersenCommit(dob_days, r_bits).
 Step H.  The Issuer constructs CredMsgV2(v, kid, c, iat, exp, schema),
          computes the credential prehash, hashes it with Blake2s-256,
@@ -374,8 +377,10 @@ Step 1.  The Relying Party calls the Verifier requesting a challenge
          and a PKCE code_challenge. The Verifier looks up the origin's
          policy record to determine the proof_direction.
 Step 2.  The Verifier generates challenge_id (UUIDv4), a 32 byte
-         rp_challenge from a CSPRNG, a 32 byte submit_secret, and a
-         human-readable short_code.
+         nonce from a CSPRNG, derives rp_challenge as
+         SHA-256(origin || nonce || "zerokp.challenge.v1"),
+         generates a 32 byte submit_secret from a CSPRNG, and a
+         12-digit numeric short_code.
 Step 3.  The Verifier stores a CachedChallenge keyed by challenge_id
          (origin, cutoff_days, proof_direction, verifying_key_id,
          code_challenge, submit_secret, expires_at, state, short_code,
@@ -571,7 +576,8 @@ The active DSTs in Section 5.1 are byte distinct and no two share a prefix. Impl
 | `CHALLENGE_EXPIRY_SECONDS` | 300 | seconds | Challenge validity window (5 minutes) |
 | `CLOCK_SKEW_TOLERANCE_SECONDS` | 30 | seconds | Generic clock drift allowance |
 | `SESSION_TIMEOUT_SECONDS` | 120 | seconds | Issuance session timeout (2 minutes) |
-| `ATTESTATION_MAX_AGE_SECONDS` | 7200 | seconds | Ed25519 attestation freshness window (2 hours). Also the retention floor for the nonce single-use store (Section 10.6). |
+| `ATTESTATION_MAX_AGE_SECONDS` | 3600 | seconds | Ed25519 attestation freshness window (1 hour) |
+| `ATTESTATION_NONCE_TTL_SECONDS` | 7200 | seconds | Nonce single-use store retention floor (2 hours), Section 10.6 |
 | `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS` | 60 | seconds | Maximum permitted clock skew when an attestation timestamp is ahead of local time |
 | `MAX_VALIDITY_SECONDS` | 3 153 600 000 | seconds | Hard ceiling on credential lifetime (`exp - iat`); 36 500 days (approximately 100 years, using 86 400 seconds per day). The RECOMMENDED default for general deployments is 7 300 days (20 years, 630 720 000 seconds) so the credential ages with the user (Section 17.12). |
 
@@ -584,6 +590,7 @@ The `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS = 60` value differs from the gener
 - `ATTESTATION_MAX_AGE_SECONDS > ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS`
 - `SESSION_TIMEOUT_SECONDS > 0`
 - `MAX_VALIDITY_SECONDS > 0`
+- `ATTESTATION_NONCE_TTL_SECONDS > ATTESTATION_MAX_AGE_SECONDS`
 
 These values are normative for v1.0 and changing any of them produces a different protocol version.
 
@@ -1050,12 +1057,12 @@ The verification step MUST use a strict verification implementation that rejects
 ```
 VerifyAttestationFresh(attestation, ed25519_vk, current_time):
     require -36525 <= attestation.dob_days <= 36525                                 // sanity
-    require current_time - attestation.timestamp <= ATTESTATION_MAX_AGE_SECONDS    // 7200
+    require current_time - attestation.timestamp <= ATTESTATION_MAX_AGE_SECONDS    // 3600
     require attestation.timestamp - current_time <= ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS // 60
     require VerifyAttestation(attestation, ed25519_vk) succeeds
 ```
 
-A conforming Issuer MUST reject any attestation with `dob_days` outside `[-36525, +36525]` (Section 10.2). A conforming Issuer MUST reject attestations whose timestamp is more than `ATTESTATION_MAX_AGE_SECONDS` (7200) seconds older than its local current time. A conforming Issuer MUST reject attestations whose timestamp is more than `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS` (60) seconds ahead of its local current time. The future skew bound is tighter than the past bound because attestations far in the future indicate clock attack rather than ordinary clock drift. The 7200 second past bound is chosen to be double the nonce single-use window so that boundary replays are blocked by the nonce store before freshness expires.
+A conforming Issuer MUST reject any attestation with `dob_days` outside `[-36525, +36525]` (Section 10.2). A conforming Issuer MUST reject attestations whose timestamp is more than `ATTESTATION_MAX_AGE_SECONDS` (3600) seconds older than its local current time. A conforming Issuer MUST reject attestations whose timestamp is more than `ATTESTATION_CLOCK_SKEW_TOLERANCE_SECONDS` (60) seconds ahead of its local current time. The future skew bound is tighter than the past bound because attestations far in the future indicate clock attack rather than ordinary clock drift. The freshness past bound is shorter than the nonce single-use window (`ATTESTATION_NONCE_TTL_SECONDS`). This guarantees that if a nonce was consumed (recorded in the consumed-nonce store) during the freshness window, its entry is still retained when any replay arrives, preventing boundary replays (replay attempts timed to fall between the freshness window expiry and the nonce store TTL expiry). An attacker who delays a captured attestation beyond `ATTESTATION_MAX_AGE_SECONDS` fails the freshness check; one who replays it within `ATTESTATION_MAX_AGE_SECONDS` is caught by the nonce store, which retains consumed entries for the full `ATTESTATION_NONCE_TTL_SECONDS` TTL.
 
 Source citation: `parley-crypto/crypto-commons/src/attestation.rs`, `Attestation::verify_with_timestamp`.
 
@@ -1063,11 +1070,11 @@ Source citation: `parley-crypto/crypto-commons/src/attestation.rs`, `Attestation
 
 A conforming Issuer MUST track attestation nonces and reject any nonce it has already accepted within the freshness window. The nonce is 32 bytes from a CSPRNG, so collisions are negligible; any apparent reuse is treated as a replay attempt.
 
-The nonce store MUST retain each consumed nonce for at least `ATTESTATION_MAX_AGE_SECONDS` (7200 seconds) from the time of consumption. Retention beyond that window is optional; entries MAY be evicted once both the freshness window has expired and the nonce has been marked consumed.
+The nonce store MUST retain each consumed nonce for at least `ATTESTATION_NONCE_TTL_SECONDS` (7200 seconds) from the time of consumption. Retention beyond `ATTESTATION_NONCE_TTL_SECONDS` from the time of consumption is optional. Entries MAY be evicted after that deadline.
 
 Normatively, the single-use guarantee requires an atomic check-and-set on the nonce store: concurrent requests presenting the same nonce MUST NOT both succeed. Eventually-consistent stores that permit a TOCTOU window between read and write MUST NOT be used for this purpose unless an independent single-writer coordinator is interposed.
 
-Note (informative). The reference `issuer-api` implementation satisfies the atomic check-and-set requirement via a Cloudflare Durable Object keyed on the prefixed nonce string (`attest:<nonce_hex>`), with TTL-based eviction at 7200 seconds. See `issuer-api/src/storage.rs::validate_and_consume_attestation_nonce` and `issuer-api/src/durable_objects/nonce_do.rs::check_and_set_internal`. Other Issuer implementations are free to choose any backing store that provides equivalent single-writer atomicity; the Durable Object choice is not normative.
+Note (informative). The reference `issuer-api` implementation satisfies the atomic check-and-set requirement via a Cloudflare Durable Object keyed on the prefixed nonce string (`attest:<nonce_hex>`), with TTL-based eviction at `ATTESTATION_NONCE_TTL_SECONDS` (7200 seconds). See `issuer-api/src/storage.rs::validate_and_consume_attestation_nonce` and `issuer-api/src/durable_objects/nonce_do.rs::check_and_set_internal`. Other Issuer implementations are free to choose any backing store that provides equivalent single-writer atomicity; the Durable Object choice is not normative.
 
 ### 10.7 Field Length Validation
 
@@ -1123,7 +1130,7 @@ The request body carries `dob_days` (signed i32), an optional `session_id`, and 
 
 1. Generates a 32 byte nonce from its CSPRNG.
 2. Constructs the attestation message per Section 10.2 over `dob_days`, its configured `issuer_id`, the current Unix timestamp, the nonce, the resolved `session_id`, and the resolved `client_id`.
-3. Signs the message with its Ed25519 signing key (Section 10.3) and stores the nonce in its single-use store with TTL 7200 seconds.
+3. Signs the message with its Ed25519 signing key (Section 10.3). The nonce is not recorded at this point. It is consumed later, at blind-issuance time (Section 11.4, Step 4), when the Wallet presents the attestation. The Issuer's nonce store holds already-consumed nonces and rejects any nonce that is already present, enforcing single-use semantics (Section 10.6).
 4. Returns the resulting `Attestation` to the Issuing Party.
 
 **Error handling.** HMAC verification failures, child-DOB guard triggers, malformed bodies, and replayed timestamps (outside the server's skew tolerance) MUST be reported to the Issuing Party with distinct error codes. The Issuer MUST NOT disclose which sub-check failed beyond the minimum necessary for the Issuing Party to correct its request.
@@ -1166,7 +1173,10 @@ Step 4.  The Issuer verifies the Attestation:
             - dob_days within [-36525, +36525]
 
          If any check fails, the Issuer MUST reject and MUST NOT
-         proceed with issuance.
+         proceed with issuance. On success, the nonce MUST be
+         atomically recorded in the consumed-nonce store with TTL
+         ATTESTATION_NONCE_TTL_SECONDS (7200 seconds) per
+         Section 10.6.
 
 Step 5.  The Issuer validates r_bits via ValidateRandomness
          (Section 9.3). On failure, it MUST reject.
@@ -1536,7 +1546,14 @@ The proving key is approximately 50 megabytes and is distributed to wallets via 
 
 ### 13.2 RP Challenge and RP Hash
 
-The Verifier mints `rp_challenge` as 32 bytes from a cryptographic random source at the time it creates a new challenge record (Section 14.2). `rp_challenge` is not derived from the origin or any other input: it is fresh randomness scoped to one challenge.
+The Verifier derives `rp_challenge` deterministically at the time it creates a new challenge record (Section 14.2). The derivation binds the challenge to the requesting origin and a fresh nonce:
+
+```
+CHALLENGE_DST = "zerokp.challenge.v1"
+rp_challenge  = SHA-256(origin || nonce || CHALLENGE_DST)   // 32 bytes
+```
+
+The `nonce` is 32 bytes drawn from a CSPRNG. The origin is the raw byte string of the Relying Party's WHATWG origin. Because the origin is hashed into `rp_challenge`, a proof generated for one origin cannot be replayed against a different origin even if the nonce were reused.
 
 `rp_hash` is the circuit public input derived from `rp_challenge`:
 
@@ -1548,7 +1565,7 @@ The Wallet computes `rp_hash` exactly this way before generating its proof. The 
 
 Blake2s-256 is used here because it is cheap in R1CS; the in-circuit cost of the wrap step is small compared to the surrounding Pedersen and signature gadgets.
 
-**Origin handling.** The origin string is recorded in the Verifier's challenge record (Section 14.2) for origin policy lookup, audit logging, and rate-limit keying. It does not flow into `rp_challenge` or `rp_hash`. The origin byte string MUST satisfy:
+**Origin handling.** The origin string flows into `rp_challenge` via the derivation above, and therefore transitively into `rp_hash`. It is also recorded in the Verifier's challenge record (Section 14.2) for origin policy lookup, audit logging, and rate-limit keying. The origin byte string MUST satisfy:
 
 - It is a valid WHATWG origin (scheme, host, and optional port; no path, query, or fragment).
 - Each byte is a printable ASCII character in the range `0x21..=0x7E`. Implementations MUST reject null bytes, any byte below `0x20`, and any byte `>= 0x7F`.
@@ -1556,7 +1573,7 @@ Blake2s-256 is used here because it is cheap in R1CS; the in-circuit cost of the
 
 Implementations MUST reject origins that fail any of these checks before storing a challenge record.
 
-Source citations: `verifier-api/src/routes/challenge.rs` (mint step), `verifier-api/src/routes/verify.rs` (verify step), `wallet-sdk/crates/core/src/prover.rs` (prover step).
+Source citations: `parley-crypto/crypto-protocol/src/lib.rs` (derivation function), `verifier-api/src/routes/challenge.rs` (challenge creation), `verifier-api/src/routes/verify.rs` (verify step), `wallet-sdk/crates/core/src/prover.rs` (prover step).
 
 ### 13.3 Origin Hash
 
@@ -1680,7 +1697,7 @@ The `vk_bytes` are the canonical Bellman serialised verifying key [Bellman] (`be
 
 The Verifier maintains a registry mapping `vk_id` to `PreparedVerifyingKey`:
 ```
-VK_REGISTRY: HashMap<u32, PreparedVerifyingKey<Bls12>>
+VK_REGISTRY: Mapping<u32, PreparedVerifyingKey<Bls12>>  // implementations may use any in-memory map keyed on the circuit version
 ```
 
 The registry MUST support multiple `vk_id` values to enable algorithm and parameter agility. When an implementation rotates the trusted setup or bumps the circuit constants version, both the old and new `vk_id` may briefly coexist in the registry until the old `vk_id`'s population of in flight proofs has drained.
@@ -1792,7 +1809,7 @@ Before verification can begin:
 
 1. The Verifier has loaded one or more `PreparedVerifyingKey` instances into its `VK_REGISTRY`, each indexed by `verifying_key_id`.
 2. The Verifier has loaded an issuer registry mapping `issuer_vk_bytes` to issuer metadata (display name, status, allowlist membership). Issuers not in the registry MUST be rejected at verification time.
-3. The Relying Party (Expert profile) has been provisioned with a `CLIENT_ID` and HMAC-SHA256 client secret at the Verifier; has registered its origin and chosen a `proof_direction` policy ("over" or "under") for that origin.
+3. The Relying Party (Expert profile) has been provisioned with a `CLIENT_ID` and HMAC-SHA256 client secret at the Verifier; has registered its origin and chosen a `proof_direction` policy (`"over_age"` or `"under_age"`) for that origin.
 4. The Wallet has a SignedCredential whose `issuer_vk` is in the Verifier's issuer registry.
 5. The Wallet has downloaded and integrity verified a proving key whose `verifying_key_id` matches a `verifying_key_id` in the Verifier's `VK_REGISTRY`.
 
@@ -1817,13 +1834,16 @@ Step 2.  The Verifier looks up the origin's policy record and derives
 Step 3.  The Verifier generates:
              challenge_id     = UUIDv4 canonical hyphenated form
                                  ([RFC9562])
-             rp_challenge     = 32 bytes from CSPRNG
+             nonce            = 32 bytes from CSPRNG
                                  (must pass validate_nonce)
+             rp_challenge     = SHA-256(origin || nonce ||
+                                 "zerokp.challenge.v1")
+                                 (32 bytes; see Section 13.2)
              submit_secret    = 32 bytes from CSPRNG
                                  (must pass validate_nonce)
-             short_code       = human-readable challenge code
-                                 (alphanumeric, suitable for verbal
-                                 handoff)
+             short_code       = 12-digit numeric code
+                                 (displayed as XXXX XXXX XXXX,
+                                 suitable for verbal handoff)
 
 Step 4.  The Verifier stores a CachedChallenge keyed by challenge_id.
          The full field list appears in Section 15.9; the fields that
@@ -1861,7 +1881,7 @@ The `expires_in` requested by the Relying Party MUST NOT exceed `CHALLENGE_EXPIR
 
 Verifiers MUST reject any challenge request with `cutoff_days` outside the inclusive range `[-36525, +36525]`. This matches the `dob_days` sanity range in Section 10.2: a cutoff outside this range cannot correspond to a plausible date of birth and is either a malformed request or an attempt to exploit wraparound arithmetic in the biasing transform (Section 6.3).
 
-The `rp_challenge` MUST satisfy `validate_nonce`: length exactly 32 bytes, at least 8 distinct byte values, not all zero. CSPRNG output overwhelmingly satisfies these properties; the validation is defence in depth. The same `validate_nonce` predicate applies uniformly to every 32 byte random value minted by a Parley role: the `rp_challenge`, the `submit_secret`, the attestation nonce (Section 10), and `r_bits` ingress. A conforming implementation MUST reject any such value that fails `validate_nonce` and MUST NOT substitute a replacement value.
+The `nonce` input to `rp_challenge` derivation MUST satisfy `validate_nonce`: length exactly 32 bytes, at least 8 distinct byte values, not all zero. CSPRNG output overwhelmingly satisfies these properties; the validation is defence in depth. The resulting `rp_challenge` (a SHA-256 output) inherits high entropy from a valid nonce. The same `validate_nonce` predicate applies uniformly to every 32 byte random value minted by a Parley role: the nonce for `rp_challenge` derivation, the `submit_secret`, the attestation nonce (Section 10), and `r_bits` ingress. A conforming implementation MUST reject any such value that fails `validate_nonce` and MUST NOT substitute a replacement value.
 
 The `submit_secret` MUST be 32 bytes from a CSPRNG. It MUST NOT be derived from any other state in the system. The Verifier returns it ONLY to the Relying Party, not to the Wallet directly. The Relying Party relays it to the Wallet (typically via the same QR code or deep link that conveys the rest of the challenge).
 
@@ -2244,7 +2264,7 @@ Source citation: `verifier-api/src/routes/verify.rs`, `PublicInputsJson` and `Is
 
 ### 15.7 RP Challenge Bytes
 
-`rp_challenge` is 32 bytes produced by the Verifier's CSPRNG at challenge-record creation time. It is not derived from any other value. The Verifier and the Wallet both compute `rp_hash = H_b2s(rp_challenge)` (Section 13.2); `rp_hash` is what flows into the circuit's public input vector at indices 2 and 3.
+`rp_challenge` is 32 bytes derived as `SHA-256(origin || nonce || "zerokp.challenge.v1")` at challenge-record creation time, where `nonce` is 32 bytes from the Verifier's CSPRNG (Section 13.2). The Verifier and the Wallet both compute `rp_hash = H_b2s(rp_challenge)` (Section 13.2); `rp_hash` is what flows into the circuit's public input vector at indices 2 and 3.
 
 `rp_challenge` travels the wire as 32 raw bytes encoded with base64url-no-pad (43 characters).
 
@@ -2273,9 +2293,9 @@ CachedChallenge {
     submit_secret:       [u8; 32],
     origin:              String,
     expires_at:          u64,             // Unix seconds
-    proof_direction:     ProofDirection,  // Over | Under, snake_case on wire
+    proof_direction:     ProofDirection,  // OverAge | UnderAge, snake_case on wire
     state:               ChallengeState,  // see below
-    short_code:          String,          // human-readable alphanumeric code
+    short_code:          String,          // 12-digit numeric code (XXXX XXXX XXXX)
     status_url:          String,          // for Relying Party polling
     verify_url:          String,          // for Wallet short-code resolution
     created_at:          u64,             // Unix seconds
@@ -2551,7 +2571,7 @@ Implementations MUST validate inputs at trust boundaries. The following table li
 | `VerificationKey::from_bytes` | in prime order subgroup, not identity, not small order |
 | `Signature::from_bytes` | `R` in subgroup, `s` canonical |
 | `validate_nonce` | length 32, ≥ 8 distinct bytes, not all zero |
-| `Attestation::verify_with_timestamp` | `timestamp >= now - 7200`, `timestamp <= now + 60` |
+| `Attestation::verify_with_timestamp` | `timestamp >= now - 3600`, `timestamp <= now + 60` |
 | `verifier::verify_age_snark` | `vk_id` registered, proof byte length validates, public inputs assemble |
 
 Validation failures MUST return errors. Implementations MUST NOT panic, abort, or coerce invalid inputs.
@@ -2692,7 +2712,7 @@ Two proofs generated by the same Wallet against the same Credential are unlinkab
 The mechanisms supporting unlinkability are:
 
 - No persistent user identifier appears in the protocol; users have no accounts at the Verifier.
-- Each verification request carries a fresh 32 byte `rp_challenge` minted by the Verifier.
+- Each verification request carries a fresh 32 byte `rp_challenge` derived by the Verifier from a CSPRNG nonce and the origin (Section 13.2).
 - The proof is zero knowledge; the proof bytes do not depend on the user identity in any way that can be reconstructed.
 - The Verifier's nullifier enables credential banning but is not linked to the user identity.
 - The Verifier API is stateless from the Wallet's perspective; each submission is independent.
@@ -2862,7 +2882,7 @@ H_b2s(b"abc") = 508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982
 
 ### A.5 RP Hash KAT
 
-`rp_challenge` is minted by the Verifier as 32 bytes from a CSPRNG (Section 13.2). The KAT below pins a fixed input to exercise the Blake2s wrap step independently of the random source.
+`rp_challenge` is derived by the Verifier as `SHA-256(origin || nonce || "zerokp.challenge.v1")` where the nonce is 32 bytes from a CSPRNG (Section 13.2). The KAT below pins a fixed `rp_challenge` input to exercise the Blake2s wrap step independently of the derivation.
 
 ```
 Input:
@@ -3061,11 +3081,11 @@ A user, Alice, born 2000-10-16 (`dob_days = 11246`), enrols via an Issuing Party
 
 1. Alice opens the Acme Bank app, completes Acme's own KYC flow, and taps "Add my age credential".
 2. The Acme Bank app (acting as the Issuing Party) authenticates to the Issuer at `POST /v1/attestation/create` using HMAC-SHA256 over its canonical request (`CLIENT_ID = "acme-bank"`, timestamp, `dob_days = 11246`, `authorizer_json` referencing the Acme session).
-3. The Issuer verifies the HMAC, applies the child-DOB guard (Alice is over 18 so the request proceeds), mints a 32 byte nonce, constructs the attestation message over `(dob_days = 11246, issuer_id = "parley.issuer.v1", timestamp = now, nonce, session_id, client_id)`, signs it with its Ed25519 key, stores the nonce for 7200 seconds, and returns the `Attestation` to the Acme Bank app.
+3. The Issuer verifies the HMAC, applies the child-DOB guard (Alice is over 18 so the request proceeds), mints a 32 byte nonce, constructs the attestation message over `(dob_days = 11246, issuer_id = "parley.issuer.v1", timestamp = now, nonce, session_id, client_id)`, signs it with its Ed25519 key, and returns the `Attestation` to the Acme Bank app. The nonce is not stored yet; it will be consumed at blind-issuance time (step 7).
 4. The Acme Bank app constructs a deep link containing the base64url-encoded attestation and invokes the Parley Wallet. Alice is bounced into the Wallet.
 5. The Wallet generates 128 bits of randomness from the iOS Secure Enclave CSPRNG. After validation (≥ 8 unique bytes, not all zero), the result is held in memory as `r_bits`.
 6. The Wallet sends `{ "attestation": <base64url>, "r_bits": <base64url 16 bytes> }` to the Issuer at `POST /v1/issuance/blind` over TLS.
-7. The Issuer verifies the attestation signature, freshness (7200 s past, 60 s future), nonce single-use, and `dob_days` within `[-36525, +36525]`. It computes `c = PedersenCommit(11246, r_bits)` (32 bytes).
+7. The Issuer verifies the attestation signature, freshness (3600 s past, 60 s future), and `dob_days` within `[-36525, +36525]`. It performs the nonce single-use check: if the nonce is already present in the consumed-nonce store, the request is rejected as a replay; otherwise the nonce is recorded with TTL `ATTESTATION_NONCE_TTL_SECONDS` (7200 seconds). It computes `c = PedersenCommit(11246, r_bits)` (32 bytes).
 8. The Issuer constructs CredMsgV2 with `v = 2`, `kid = "parley.age.v1"` (exactly 14 bytes), `c`, `iat = now`, `exp = now + 7 300 days`, `schema = "parley.age/1"` (exactly 12 bytes). It computes the prehash, Blake2s hashes it, signs with RedJubjub, and self-verifies.
 9. The Issuer returns the SignedCredential to the Wallet and zeroises `dob_days` and `r_bits` from memory. It writes an audit log entry containing the Acme Bank `CLIENT_ID`, timestamp, `kid`, `iat`, `exp`, and schema, with no DOB or randomness.
 10. The Wallet verifies the credential: recomputes `c' = PedersenCommit(11246, r_bits)` and confirms `c' == credential.c_bytes` in constant time, verifies the RedJubjub signature, confirms `iat <= now < exp`. On success, it stores `{ SignedCredential, dob_days = 11246, r_bits }` in the iOS Keychain.
@@ -3075,8 +3095,8 @@ A user, Alice, born 2000-10-16 (`dob_days = 11246`), enrols via an Issuing Party
 Alice attempts to access an age-restricted website. The site (Relying Party) uses the Expert integration profile.
 
 1. The Relying Party authenticates to the Verifier with HMAC-SHA256 and requests a challenge. Its request carries `origin = "https://example.com"`, `method = "POST"`, `cutoff_days = 11246`, `expires_in = 300`, `code_challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"`, `verifying_key_id = 2031517468`, and the `authorizer` identifying the Relying Party's registered `CLIENT_ID`.
-2. The Verifier looks up the origin policy for `https://example.com`, finds `proof_direction = "over"`, and mints a fresh challenge: `challenge_id = "a4c8d3e0-5f1b-4a2c-9c7e-1234567890ab"` (UUIDv4), `rp_challenge = 32 random bytes`, `submit_secret = 32 random bytes`, `short_code = "9FXQ7K"`. It stores a `CachedChallenge` in state `Pending` with all 21 fields populated per Section 15.9.
-3. The Verifier returns to the Relying Party: `{ challenge_id, rp_challenge: base64url, cutoff_days, verifying_key_id, submit_secret: base64url, expires_at, proof_direction: "over", short_code, status_url, verify_url }`.
+2. The Verifier looks up the origin policy for `https://example.com`, finds `proof_direction = "over_age"`, and mints a fresh challenge: `challenge_id = "a4c8d3e0-5f1b-4a2c-9c7e-1234567890ab"` (UUIDv4), `nonce = 32 bytes from CSPRNG`, `rp_challenge = SHA-256(origin || nonce || "zerokp.challenge.v1")`, `submit_secret = 32 random bytes`, `short_code = "483729105648"`. It stores a `CachedChallenge` in state `Pending` with all 21 fields populated per Section 15.9.
+3. The Verifier returns to the Relying Party: `{ challenge_id, rp_challenge: base64url, cutoff_days, verifying_key_id, submit_secret: base64url, expires_at, proof_direction: "over_age", short_code, status_url, verify_url }`.
 4. The Relying Party renders a QR code containing the challenge fields. Alice scans it with her Wallet.
 5. The Wallet performs preflight (Section 13.5): recomputes `c'` from her stored `dob_days = 11246` and `r_bits`, confirms `c' == credential.c_bytes`, verifies the RedJubjub signature off-circuit, confirms the credential has not expired, locally checks `bias(11246) >= bias(11246)` (boundary case passes).
 6. The Wallet computes `cred_nullifier = PedersenNullifier(credential.c_bytes)` and `rp_hash = Blake2s-256(rp_challenge)`.
@@ -3098,7 +3118,7 @@ Alice attempts to access an age-restricted website. The site (Relying Party) use
      }
    }
    ```
-9. The Verifier runs Section 14.6 step 10: loads the CachedChallenge, validates `submit_secret` and `rp_challenge` in constant time (`subtle::ConstantTimeEq::ct_eq`), recomputes `rp_hash`, checks the ban store (no entry, no insertion since the nullifier was not banned), looks up the issuer in its allowlist (Active), looks up `verifying_key_id = 2031517468` in `VK_REGISTRY`, assembles the public inputs using `proof_direction = "over"` from the stored record, and runs `bellman::groth16::verify_proof`. The result is true.
+9. The Verifier runs Section 14.6 step 10: loads the CachedChallenge, validates `submit_secret` and `rp_challenge` in constant time (`subtle::ConstantTimeEq::ct_eq`), recomputes `rp_hash`, checks the ban store (no entry, no insertion since the nullifier was not banned), looks up the issuer in its allowlist (Active), looks up `verifying_key_id = 2031517468` in `VK_REGISTRY`, assembles the public inputs using `proof_direction = "over_age"` from the stored record, and runs `bellman::groth16::verify_proof`. The result is true.
 10. The Verifier transitions `CachedChallenge.state` from `Pending` to `ProofOkWaitingForRedeem` and records `result = Some(true)`.
 11. The Relying Party redeems the result at `POST /v1/challenge/a4c8d3e0-5f1b-4a2c-9c7e-1234567890ab/redeem` with body `{ "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk" }`. The Verifier compares `SHA-256(code_verifier)` against the decoded `code_challenge` bytes in constant time, transitions the state to `Verified`, and returns `{ "result": "OK", "verified": true }`.
 12. The Relying Party grants Alice access.
@@ -3246,12 +3266,12 @@ struct AgeWitness {
 
 ```rust
 enum ProofDirection {
-    Over,    // cutoff >= dob (user is at least min_age)
-    Under,   // dob >= cutoff (user is at most max_age)
+    OverAge,   // cutoff >= dob (user is at least min_age)
+    UnderAge,  // dob >= cutoff (user is at most max_age)
 }
 ```
 
-The wire JSON representation uses snake-case strings: `"over"` and `"under"`. The circuit public-input bit encoding is `1` for `Over` and `0` for `Under`.
+The wire JSON representation uses snake_case strings: `"over_age"` and `"under_age"`. The circuit public-input bit encoding is `1` for `OverAge` and `0` for `UnderAge`.
 
 ### C.9 CachedChallenge (Verifier Internal)
 
@@ -3428,7 +3448,7 @@ The deterministic nonce derivation pattern ([RFC6979]) due to Thomas Pornin infl
 
 The `arkworks` project and the Zcash Foundation provided cross-implementation reference points during specification authoring.
 
-The Maelstrom AI engineering team conducted the protocol design, implementation, and security review across the verifier-api, issuer-api, hosted-backend, parley-crypto, and wallet-sdk codebases.
+Maelstrom AI conducted the protocol design, implementation, and security review across the verifier-api, issuer-api, parley-crypto, and wallet-sdk codebases.
 
 ---
 
